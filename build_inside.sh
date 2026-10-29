@@ -268,6 +268,29 @@ with open(path, "w") as f:
 '
 fi
 
+# Inyectar includes necesarios en wrapper_log.c
+WRAPPER_LOG_FILE="src/vulkan/wrapper/wrapper_log.c"
+if [ -f "$WRAPPER_LOG_FILE" ]; then
+    python3 -c '
+path = "src/vulkan/wrapper/wrapper_log.c"
+with open(path, "r") as f:
+    content = f.read()
+
+headers = """#include <stdio.h>
+#include <stdarg.h>
+#include <limits.h>
+#include <fcntl.h>
+#include <unistd.h>
+"""
+
+if "#include <stdio.h>" not in content:
+    content = headers + content
+
+with open(path, "w") as f:
+    f.write(content)
+'
+fi
+
 # ⚙️ 10. COMPILACIÓN CON NINJA
 echo "-> Ejecutando compilación del wrapper Vulkan y el puente Mali..."
 ninja -C "${BUILD_DIR}"
