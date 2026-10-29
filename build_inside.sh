@@ -140,25 +140,21 @@ if [ -f "$THREADS_POSIX_FILE" ]; then
     sed -i 's/pthread_once(flag, func);/pthread_once((pthread_once_t *)flag, func);/g' "$THREADS_POSIX_FILE"
 fi
 
-# Parche flexible con Python para comentar cualquier línea con 'isb' en bcenabler.cpp
-BCENABLER_FILE="subprojects/libadrenotools/src/bcenabler.cpp"
-if [ -f "$BCENABLER_FILE" ]; then
-    python3 -c '
-path = "subprojects/libadrenotools/src/bcenabler.cpp"
-with open(path, "r") as f:
-    lines = f.readlines()
-
-new_lines = []
-for line in lines:
-    if "isb" in line:
-        new_lines.append("    // " + line.strip() + " // Patcheado para x86_64\n")
-    else:
-        new_lines.append(line)
-
-with open(path, "w") as f:
-    f.writelines(new_lines)
+# Parche global omnidireccional para eliminar 'isb' en cualquier bcenabler.cpp encontrado
+python3 -c '
+import os
+for root, dirs, files in os.walk("."):
+    for file in files:
+        if file == "bcenabler.cpp":
+            path = os.path.join(root, file)
+            print(f"-> Limpiando instrucción isb en: {path}")
+            with open(path, "r") as f:
+                content = f.read()
+            content = content.replace("\"isb\"", "\"\"")
+            content = content.replace("isb", "")
+            with open(path, "w") as f:
+                f.write(content)
 '
-fi
 
 # ⚙️ 10. COMPILACIÓN CON NINJA
 echo "-> Ejecutando compilación del wrapper Vulkan y el puente Mali..."
