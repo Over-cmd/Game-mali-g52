@@ -555,7 +555,7 @@ wrapper_device_memory_from_handle(struct wrapper_device *device,
 }
 
 /* Sincroniza la caché de CPU de las reservas cacheadas. */
-void
+static void
 wrapper_sync_cached_memory(struct wrapper_device *device)
 {
    static int on = -1;
