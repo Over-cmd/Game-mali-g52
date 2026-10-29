@@ -3,12 +3,13 @@ set -e
 
 BUILD_DIR="${1:-${BUILD_DIR:-build}}"
 
-# 🚀 1. INSTALAR TODAS LAS DEPENDENCIAS DE DESARROLLO EN EL CONTENEDOR DE GITHUB ACTIONS
+# 🚀 1. INSTALAR DEPENDENCIAS BÁSICAS DEL SISTEMA
 echo "-> Verificando e instalando dependencias de desarrollo necesarias..."
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq || true
 apt-get install -y -qq \
-    libdrm-dev \
+    git \
+    ninja-build \
     libx11-dev \
     libxcb-randr0-dev \
     libxfixes-dev \
@@ -21,7 +22,7 @@ apt-get install -y -qq \
     libzstd-dev \
     build-essential || true
 
-# 🚀 2. CONFIGURACIÓN DINÁMICA DE PKG_CONFIG_PATH SEGÚN LA ARQUITECTURA
+# 🚀 2. CONFIGURAR PKG_CONFIG_PATH PARA INCLUIR /usr/local Y RUTAS LOCALES
 ARCH=$(uname -m)
 if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
     MULTIARCH_PATH="/usr/lib/aarch64-linux-gnu/pkgconfig"
@@ -31,16 +32,24 @@ else
     MULTIARCH_PATH="/usr/lib/pkgconfig"
 fi
 
-export PKG_CONFIG_PATH="$MULTIARCH_PATH:/usr/share/pkgconfig:/usr/local/lib/pkgconfig"
+export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig:$MULTIARCH_PATH:/usr/share/pkgconfig"
 export PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1
 export PKG_CONFIG_ALLOW_SYSTEM_LIBS=1
 
-echo "-> Usando PKG_CONFIG_PATH: $PKG_CONFIG_PATH"
+# 🚀 3. COMPILAR E INSTALAR LIBDRM DESDE EL REPO DE WAYDROID (LINEAGE-20)
+echo "-> Clonando y compilando libdrm desde Waydroid (lineage-20)..."
+rm -rf /tmp/android_external_libdrm
+git clone --depth 1 https://github.com/waydroid/android_external_libdrm -b lineage-20 /tmp/android_external_libdrm
+cd /tmp/android_external_libdrm
+rm -rf build_libdrm
+meson setup build_libdrm --prefix=/usr/local -Dlibdrm=true -Dvalgrind=disabled -Dudev=false
+ninja -C build_libdrm install
+cd - > /dev/null
 
-# 🚀 3. EXPORTAR PYTHONPATH PARA LOS SCRIPTS DE NIR/COMPILER DE MESA
+# 🚀 4. EXPORTAR PYTHONPATH PARA LOS SCRIPTS DE NIR/COMPILER DE MESA
 export PYTHONPATH="/workspace/src/compiler:/workspace/src/compiler/nir:$PYTHONPATH"
 
-# 🚀 4. CREAR EL STUB (SIMULADOR) DE LIBANDROID PARA QUE LIBADRENOTOOLS COMPILE PERFECTAMENTE
+# 🚀 5. CREAR EL STUB (SIMULADOR) DE LIBANDROID PARA QUE LIBADRENOTOOLS COMPILE PERFECTAMENTE
 echo "-> Forjando stub temporal de libandroid para libadrenotools..."
 mkdir -p /tmp/android_stub
 cat << 'EOF' > /tmp/android_stub/android_stub.c
@@ -51,10 +60,10 @@ gcc -shared -fPIC /tmp/android_stub/android_stub.c -o /tmp/android_stub/libandro
 export LDFLAGS="-L/tmp/android_stub $LDFLAGS"
 export CFLAGS="-I/tmp/android_stub $CFLAGS"
 
-# 🛠️ 5. LIMPIAR DIRECTORIO DE COMPILACIÓN ANTERIOR
+# 🛠️ 6. LIMPIAR DIRECTORIO DE COMPILACIÓN ANTERIOR DE MESA
 rm -rf "${BUILD_DIR}"
 
-# 🟢 6. CONFIGURACIÓN CON MESON (Nativo para Linux X11 / Winlator Bionic con soporte completo)
+# 🟢 7. CONFIGURACIÓN CON MESON (Nativo para Linux X11 / Winlator Bionic con soporte completo)
 meson subprojects download || true
 
 meson setup "${BUILD_DIR}" \
@@ -74,11 +83,11 @@ meson setup "${BUILD_DIR}" \
 -Dzlib=enabled \
 -Dzstd=enabled
 
-# ⚙️ 7. COMPILACIÓN CON NINJA
+# ⚙️ 8. COMPILACIÓN CON NINJA
 echo "-> Ejecutando compilación del wrapper Vulkan y el puente Mali..."
 ninja -C "${BUILD_DIR}"
 
-# 🟢 8. EXTRACCIÓN DEL BINARIO DEL WRAPPER
+# 🟢 9. EXTRACCIÓN DEL BINARIO DEL WRAPPER
 python3 -c '
 import os, shutil
 
@@ -108,10 +117,10 @@ else:
     exit(1)
 '
 
-# 🟢 9. STRIP DE SÍMBOLOS
+# 🟢 10. STRIP DE SÍMBOLOS
 strip --strip-unneeded -o "${BUILD_DIR}/libvulkan_wrapper.so" "${BUILD_DIR}/libvulkan_wrapper.so.unstripped"
 
-# 🟢 10. ÁRBOL DE DIRECTORIOS RÍGIDO CON ICD RELATIVO (Formato Bannerlator)
+# 🟢 11. ÁRBOL DE DIRECTORIOS RÍGIDO CON ICD RELATIVO (Formato Bannerlator)
 ROOTFS_DIR="${BUILD_DIR}/rootfs_export"
 rm -rf "${ROOTFS_DIR}"
 mkdir -p "${ROOTFS_DIR}/usr/lib"
@@ -139,7 +148,7 @@ cat << 'EOF' > "${ROOTFS_DIR}/usr/share/vulkan/icd.d/wrapper_icd.json"
 }
 EOF
 
-# 🟢 11. EMPAQUETADO TAR.ZST PARA BANNERLATOR
+# 🟢 12. EMPAQUETADO TAR.ZST PARA BANNERLATOR
 echo "-> Forjando el paquete comprimido gamenative_driver_rootfs.tar.zst..."
 cd "${ROOTFS_DIR}"
 tar -cvf - usr | zstd -o "../gamenative_driver_rootfs.tar.zst"
