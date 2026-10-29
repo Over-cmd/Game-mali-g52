@@ -3,332 +3,90 @@ set -e
 
 BUILD_DIR="${1:-${BUILD_DIR:-build}}"
 
-# 🚀 0. CORREGIR REPOSITORIOS DE UBUNTU BIONIC (EOL -> OLD-RELEASES)
-echo "-> Actualizando fuentes de APT para Ubuntu Bionic (Old-Releases)..."
-sed -i 's/archive.ubuntu.com/old-releases.ubuntu.com/g' /etc/apt/sources.list 2>/dev/null || true
-sed -i 's/security.ubuntu.com/old-releases.ubuntu.com/g' /etc/apt/sources.list 2>/dev/null || true
-sed -i '/deb-src/d' /etc/apt/sources.list 2>/dev/null || true
+# 🚀 1. PREPARAR SYSROOT DE TERMUX (Si no existe)
+if [ ! -d "/tmp/sysroot_ready" ]; then
+    echo "-> Descargando librerías y dependencias desde el repositorio de Termux..."
+    mkdir -p /tmp/sysroot
+    cd /tmp/sysroot
+    TERMUX_REPO="https://packages-cf.termux.dev/apt/termux-main"
+    curl -s "${TERMUX_REPO}/dists/stable/main/binary-aarch64/Packages" > Packages
+    PACKAGES="libdrm libandroid-shmem libxcb libx11 libxshmfence libxext libxrandr libxrender xorgproto libxau libxdmcp"
+    for pkg in $PACKAGES; do
+        pkg_path=$(awk -v p="Package: $pkg" '$0==p{flag=1} flag && /^Filename:/{print $2; exit}' Packages)
+        if [ -n "$pkg_path" ]; then
+            curl -L -s -O "${TERMUX_REPO}/${pkg_path}"
+        fi
+    done
+    mkdir -p /data/data/com.termux/files/usr
+    for f in *.deb; do
+        if [ -f "$f" ]; then
+            dpkg-deb -x "$f" /
+        fi
+    done
+    touch /tmp/sysroot_ready
+    cd - > /dev/null
+fi
 
-# 🚀 1. INSTALAR DEPENDENCIAS BÁSICAS Y DE DESARROLLO DEL SISTEMA
-echo "-> Verificando e instalando dependencias de desarrollo necesarias..."
-export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-apt-get install -y -qq --allow-change-held-packages \
-    git \
-    ninja-build \
-    libx11-dev \
-    libxcb-randr0-dev \
-    libxfixes-dev \
-    libx11-xcb-dev \
-    libxcb-dri3-dev \
-    libxcb-present-dev \
-    libxshmfence-dev \
-    pkg-config \
-    zlib1g-dev \
-    libzstd-dev \
-    build-essential
+# 🚀 2. GENERAR ARCHIVO DE CROSS-COMPILACIÓN PARA EL NDK
+NDK_DIR=$(find /home/builder/lib -maxdepth 2 -name "android-ndk*" 2>/dev/null | head -n 1)
+if [ -z "$NDK_DIR" ]; then
+    NDK_DIR=$(find /opt /usr/local /home -maxdepth 3 -name "android-ndk*" 2>/dev/null | head -n 1)
+fi
+NDK_BIN="${NDK_DIR}/toolchains/llvm/prebuilt/linux-x86_64/bin"
 
-# 🚀 2. CONFIGURACIÓN EXHAUSTIVA DE PKG_CONFIG_PATH
-export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig"
-export PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1
-export PKG_CONFIG_ALLOW_SYSTEM_LIBS=1
+mkdir -p /root/build-config
+cat << EOF > /root/build-config/cross_file.txt
+[binaries]
+c = '${NDK_BIN}/aarch64-linux-android30-clang'
+cpp = '${NDK_BIN}/aarch64-linux-android30-clang++'
+ar = '${NDK_BIN}/llvm-ar'
+strip = '${NDK_BIN}/llvm-strip'
+pkg-config = 'pkg-config'
 
-echo "-> PKG_CONFIG_PATH configurado como: $PKG_CONFIG_PATH"
+[constants]
+termux_dir = '/data/data/com.termux/files/usr'
 
-# 🚀 3. COMPILAR E INSTALAR LIBDRM DESDE EL REPO DE WAYDROID (LINEAGE-20)
-echo "-> Clonando y compilando libdrm desde Waydroid (lineage-20)..."
-rm -rf /tmp/android_external_libdrm
-git clone --depth 1 https://github.com/waydroid/android_external_libdrm -b lineage-20 /tmp/android_external_libdrm
-cd /tmp/android_external_libdrm
-rm -rf build_libdrm
-meson setup build_libdrm --prefix=/usr/local -Dvalgrind=disabled -Dudev=false
-ninja -C build_libdrm install
-cd - > /dev/null
+[properties]
+pkg_config_libdir = termux_dir + '/lib/pkgconfig:' + termux_dir + '/share/pkgconfig'
 
-# 🚀 4. EXPORTAR PYTHONPATH PARA LOS SCRIPTS DE NIR/COMPILER DE MESA
-export PYTHONPATH="/workspace/src/compiler:/workspace/src/compiler/nir:$PYTHONPATH"
+[built-in options]
+c_args = ['-D__TERMUX__', '-D__USE_GNU', '-U__ANDROID__', '-I' + termux_dir + '/include', '-include', 'fcntl.h', '-include', 'unistd.h']
+cpp_args = ['-D__TERMUX__', '-D__USE_GNU', '-U__ANDROID__', '-I' + termux_dir + '/include', '-include', 'fcntl.h', '-include', 'unistd.h']
+c_link_args = ['-L' + termux_dir + '/lib', '-landroid-shmem']
+cpp_link_args = ['-L' + termux_dir + '/lib', '-landroid-shmem']
 
-# 🚀 5. COMPILAR LOS STUBS DE ANDROID AMPLIADOS
-echo "-> Compilando librerías de stubs de Android ampliadas..."
-mkdir -p /tmp/android_build_stubs
-
-cat << 'EOF' > /tmp/android_build_stubs/android_stub.c
-#include <stddef.h>
-#include <stdint.h>
-#include <dlfcn.h>
-
-extern "C" {
-void AConfiguration_fromAssetManager() {}
-void AAssetManager_fromJava() {}
-
-int android_get_device_api_level() {
-    return 30; // Simulamos Android 11 (API 30)
-}
-
-void* android_dlopen_ext(const char* filename, int flags, const void* info) {
-    return dlopen(filename, flags);
-}
-}
+[host_machine]
+system = 'android'
+cpu_family = 'aarch64'
+cpu = 'armv8-a'
+endian = 'little'
 EOF
 
-cat << 'EOF' > /tmp/android_build_stubs/log_stub.c
-extern "C" {
-int __android_log_print(int, const char*, const char*, ...) { return 0; }
-void __android_log_write() {}
-void __android_log_assert() {}
-}
-EOF
-
-cat << 'EOF' > /tmp/android_build_stubs/cutils_stub.cpp
-#include <stdint.h>
-extern "C" {
-int property_get(const char*, char *value, const char *default_value) {
-   if (default_value) {
-       int i = 0;
-       while (default_value[i] != '\0' && i < 91) { value[i] = default_value[i]; i++; }
-       value[i] = '\0';
-       return i;
-   }
-   return 0;
-}
-void atrace_begin_body(const char*) {}
-void atrace_end_body() {}
-void atrace_init() {}
-uint64_t atrace_get_enabled_tags() { return 0; }
-}
-EOF
-
-g++ -shared -fPIC /tmp/android_build_stubs/android_stub.c -o /tmp/android_build_stubs/libandroid.so -ldl
-g++ -shared -fPIC /tmp/android_build_stubs/log_stub.c -o /tmp/android_build_stubs/liblog.so
-g++ -shared -fPIC -I/workspace/include/android_stub /tmp/android_build_stubs/cutils_stub.cpp -o /tmp/android_build_stubs/libcutils.so
-
-# 🚀 5.1 CREAR EL DLEXT.H CON SOPORTE ROBUSTO PARA OFF64_T
-DLEXT_HEADER="include/android_stub/android/dlext.h"
-mkdir -p "$(dirname "$DLEXT_HEADER")"
-cat << 'EOF' > "$DLEXT_HEADER"
-#ifndef ANDROID_DLEXT_H
-#define ANDROID_DLEXT_H
-
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
-
-#include <sys/types.h>
-
-#ifndef off64_t
-typedef int64_t off64_t;
-#endif
-
-#ifdef __cplusplus
-#include <cstdint>
-extern "C" {
-#else
-#include <stdint.h>
-#endif
-
-#define ANDROID_DLEXT_RESERVED_ADDRESS    0x00000001
-#define ANDROID_DLEXT_RESERVED_SIZE       0x00000002
-#define ANDROID_DLEXT_FAST_LOAD           0x00000004
-#define ANDROID_DLEXT_USE_RELRO           0x00000008
-#define ANDROID_DLEXT_USE_LIBRARY_FD      0x00000010
-#define ANDROID_DLEXT_USE_LIBRARY_OFFSET  0x00000020
-#define ANDROID_DLEXT_USE_NAMESPACE       0x00000040
-
-struct android_namespace_t;
-
-typedef struct android_dlextinfo {
-    uint64_t flags;
-    void* reserved_addr;
-    size_t reserved_size;
-    int relro_fd;
-    int library_fd;
-    off64_t library_offset;
-    struct android_namespace_t* library_namespace;
-    uint64_t reserved1;
-    uint64_t reserved2;
-    int target_sdk_version;
-    int unused1;
-} android_dlextinfo;
-
-void* android_dlopen_ext(const char* filename, int flags, const android_dlextinfo* info);
-int android_get_device_api_level(void);
-
-#ifdef __cplusplus
-}
-#endif
-
-#endif /* ANDROID_DLEXT_H */
-EOF
-
-# 🚀 6. CONFIGURAR RUTAS HACIA LOS STUBS Y FLAGS
-export LDFLAGS="-L/tmp/android_build_stubs -L/workspace/src/android_stub $LDFLAGS"
-export CFLAGS="-I/workspace/include/android_stub -D__STDC_NO_THREADS__=1 $CFLAGS"
-export CXXFLAGS="-I/workspace/include/android_stub -D_GNU_SOURCE -D__ANDROID__ -D__aarch64__ -D__STDC_NO_THREADS__=1 $CXXFLAGS"
-
-# 🛠️ 7. LIMPIAR DIRECTORIO DE COMPILACIÓN ANTERIOR DE MESA
-rm -rf "${BUILD_DIR}"
-
-# 🟢 8. CONFIGURACIÓN CON MESON
-meson subprojects download || true
-
-meson setup "${BUILD_DIR}" \
--Db_sanitize=none \
--Db_lundef=true \
--Dcpp_rtti=false \
--Dopengl=true \
--Dllvm=disabled \
--Dshared-llvm=disabled \
--Dplatforms=x11 \
--Dgallium-drivers= \
--Ddraw-use-llvm=false \
--Dxmlconfig=disabled \
--Dvulkan-drivers=wrapper \
--Degl=disabled \
--Dglx=disabled \
--Dzlib=enabled \
--Dzstd=enabled
-
-# 🚀 9. PARCHES AUTOMÁTICOS DE COMPATIBILIDAD
-echo "-> Aplicando parches de compatibilidad..."
-ADRENOTOOLS_FILE="subprojects/libadrenotools/lib/linkernsbypass/android_linker_ns.cpp"
-if [ -f "$ADRENOTOOLS_FILE" ]; then
-    sed -i '1i #include <climits>\n#include <sys/syscall.h>\n#include <unistd.h>' "$ADRENOTOOLS_FILE"
+# 🚀 3. CONFIGURACIÓN CON MESON
+if [ ! -d "${BUILD_DIR}" ]; then
+  echo "-> Configurando proyecto con Meson (Cross-compilación NDK)..."
+  meson setup "${BUILD_DIR}" --cross-file /root/build-config/cross_file.txt \
+      -Dcpp_rtti=false \
+      -Dgbm=disabled \
+      -Dopengl=false \
+      -Dllvm=disabled \
+      -Dshared-llvm=disabled \
+      -Dplatforms=x11 \
+      -Dgallium-drivers= \
+      -Dxmlconfig=disabled \
+      -Dvulkan-drivers=wrapper
 fi
 
-KGSL_HEADER="subprojects/libadrenotools/src/hook/kgsl.h"
-if [ -f "$KGSL_HEADER" ]; then
-    sed -i '1i #ifndef __user\n#define __user\n#endif' "$KGSL_HEADER"
-fi
+# 🚀 4. COMPILACIÓN CON NINJA
+echo "-> Compilando con Ninja..."
+ninja -C "${BUILD_DIR}" src/vulkan/wrapper/libvulkan_wrapper.so
 
-THREADS_POSIX_FILE="src/c11/impl/threads_posix.c"
-if [ -f "$THREADS_POSIX_FILE" ]; then
-    sed -i 's/pthread_once(flag, func);/pthread_once((pthread_once_t *)flag, func);/g' "$THREADS_POSIX_FILE"
-fi
+# 🚀 5. POST-PROCESAMIENTO Y STRIP
+cp "${BUILD_DIR}/src/vulkan/wrapper/libvulkan_wrapper.so" "${BUILD_DIR}/libvulkan_wrapper.so.unstripped"
+STRIP="${NDK_BIN}/llvm-strip"
+$STRIP --strip-unneeded -o "${BUILD_DIR}/libvulkan_wrapper.so" "${BUILD_DIR}/libvulkan_wrapper.so.unstripped"
 
-# Neutralizar bcenabler.cpp
-python3 -c '
-import os
-for root, dirs, files in os.walk("."):
-    for file in files:
-        if file == "bcenabler.cpp":
-            path = os.path.join(root, file)
-            with open(path, "w") as f:
-                f.write("// Vaciado para evitar instrucciones ARM isb en x86_64\n")
-'
-
-# Neutralizar wsi_common_android.c
-WSI_ANDROID_FILE="src/vulkan/wsi/wsi_common_android.c"
-if [ -f "$WSI_ANDROID_FILE" ]; then
-    python3 -c '
-path = "src/vulkan/wsi/wsi_common_android.c"
-with open(path, "w") as f:
-    f.write("/* Vaciado para compatibilidad con wrapper X11/Adrenotools */\n")
-'
-fi
-
-# Resolver conflicto de buffer_handle_t con native_handle.h
-NATIVE_HANDLE_HEADER="include/android_stub/cutils/native_handle.h"
-if [ -f "$NATIVE_HANDLE_HEADER" ]; then
-    python3 -c '
-path = "include/android_stub/cutils/native_handle.h"
-with open(path, "r") as f:
-    content = f.read()
-content = content.replace("typedef const native_handle_t* buffer_handle_t;", "/* typedef omitido por conflicto con Vulkan */")
-with open(path, "w") as f:
-    f.write(content)
-'
-fi
-
-# Hacer spirv_patcher.hpp compatible tanto con C como con C++
-SPIRV_PATCHER_HEADER="src/vulkan/wrapper/spirv_patcher.hpp"
-if [ -f "$SPIRV_PATCHER_HEADER" ]; then
-    python3 -c '
-path = "src/vulkan/wrapper/spirv_patcher.hpp"
-with open(path, "r") as f:
-    content = f.read()
-
-safe_headers = """#ifdef __cplusplus
-#include <cstdint>
-#include <cstddef>
-#include <unordered_map>
-#else
-#include <stdint.h>
-#include <stddef.h>
-#endif
-"""
-
-content = content.replace("#include <cstdint>", "")
-content = content.replace("#include <cstddef>", "")
-content = content.replace("#include <unordered_map>", "")
-
-content = safe_headers + "\n" + content
-
-with open(path, "w") as f:
-    f.write(content)
-'
-fi
-
-# Inyectar includes necesarios en wrapper_log.c
-WRAPPER_LOG_FILE="src/vulkan/wrapper/wrapper_log.c"
-if [ -f "$WRAPPER_LOG_FILE" ]; then
-    python3 -c '
-path = "src/vulkan/wrapper/wrapper_log.c"
-with open(path, "r") as f:
-    content = f.read()
-
-headers = """#include <stdio.h>
-#include <stdarg.h>
-#include <limits.h>
-#include <fcntl.h>
-#include <unistd.h>
-"""
-
-if "#include <stdio.h>" not in content:
-    content = headers + content
-
-with open(path, "w") as f:
-    f.write(content)
-'
-fi
-
-# ⚙️ 10. COMPILACIÓN CON NINJA
-echo "-> Ejecutando compilación del wrapper Vulkan y el puente Mali..."
-ninja -C "${BUILD_DIR}"
-
-# 🟢 11. EXTRACCIÓN DEL BINARIO DEL WRAPPER
-python3 -c '
-import os, shutil
-
-build_dir = "'"${BUILD_DIR}"'"
-dst = os.path.join(build_dir, "libvulkan_wrapper.so.unstripped")
-
-candidates = []
-for root, dirs, files in os.walk(build_dir):
-    for file in files:
-        if file.endswith(".so") and not any(x in file for x in ["expat", "glapi", "test"]):
-            candidates.append(os.path.join(root, file))
-
-src = None
-for c in candidates:
-    if "wrapper" in c or "vulkan" in c:
-        src = c
-        break
-
-if not src and candidates:
-    src = candidates[0]
-
-if src and os.path.exists(src):
-    shutil.copy2(src, dst)
-    print(f"-> [Forja Real] Driver wrapper localizado en {src}")
-else:
-    print("-> [❌ ERROR CRÍTICO] No se encontró el binario del wrapper.")
-    exit(1)
-'
-
-# 🟢 12. STRIP DE SÍMBOLOS
-strip --strip-unneeded -o "${BUILD_DIR}/libvulkan_wrapper.so" "${BUILD_DIR}/libvulkan_wrapper.so.unstripped"
-
-# 🟢 13. ÁRBOL DE DIRECTORIOS RÍGIDO CON ICD RELATIVO (Formato Bannerlator)
+# 🚀 6. EMPAQUETADO FINAL EN ROOTFS PARA BANNERLATOR / WINLATOR
 ROOTFS_DIR="${BUILD_DIR}/rootfs_export"
 rm -rf "${ROOTFS_DIR}"
 mkdir -p "${ROOTFS_DIR}/usr/lib"
@@ -336,15 +94,8 @@ mkdir -p "${ROOTFS_DIR}/usr/share/vulkan/icd.d"
 
 cp "${BUILD_DIR}/libvulkan_wrapper.so" "${ROOTFS_DIR}/usr/lib/libvulkan_wrapper.so"
 
-python3 -c '
-import os, shutil
-build_dir = "'"${BUILD_DIR}"'"
-rootfs_lib = "'"${ROOTFS_DIR}"'/usr/lib"
-for root, dirs, files in os.walk(os.path.join(build_dir, "subprojects")):
-    for file in files:
-        if file.endswith(".so"):
-            shutil.copy2(os.path.join(root, file), os.path.join(rootfs_lib, file))
-' 2>/dev/null || true
+# Copiar librerías de dependencias compartidas necesarias
+find "${BUILD_DIR}" -name "*.so" -exec cp {} "${ROOTFS_DIR}/usr/lib/" \; 2>/dev/null || true
 
 cat << 'EOF' > "${ROOTFS_DIR}/usr/share/vulkan/icd.d/wrapper_icd.json"
 {
@@ -356,8 +107,7 @@ cat << 'EOF' > "${ROOTFS_DIR}/usr/share/vulkan/icd.d/wrapper_icd.json"
 }
 EOF
 
-# 🟢 14. EMPAQUETADO TAR.ZST PARA BANNERLATOR
-echo "-> Forjando el paquete comprimido gamenative_driver_rootfs.tar.zst..."
+echo "-> Empaquetando rootfs comprimido en tar.zst..."
 cd "${ROOTFS_DIR}"
 tar -cvf - usr | zstd -o "../gamenative_driver_rootfs.tar.zst"
 cd - > /dev/null
@@ -365,5 +115,5 @@ cd - > /dev/null
 cp "${BUILD_DIR}/gamenative_driver_rootfs.tar.zst" ./gamenative_driver_rootfs.tar.zst
 
 echo "=========================================================="
-echo " 🟢 FORJA WINLATOR BIONIC EXITOSA: ¡ROOTFS LISTO!          "
+echo " 🟢 BUILD EXITOSO: gamenative_driver_rootfs.tar.zst LISTO!"
 echo "=========================================================="
