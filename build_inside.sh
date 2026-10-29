@@ -55,6 +55,7 @@ mkdir -p /tmp/android_build_stubs
 cat << 'EOF' > /tmp/android_build_stubs/android_stub.c
 #include <stddef.h>
 #include <stdint.h>
+#include <dlfcn.h>
 
 extern "C" {
 void AConfiguration_fromAssetManager() {}
@@ -65,7 +66,7 @@ int android_get_device_api_level() {
 }
 
 void* android_dlopen_ext(const char* filename, int flags, const void* info) {
-    return NULL;
+    return dlopen(filename, flags);
 }
 }
 EOF
@@ -97,11 +98,11 @@ uint64_t atrace_get_enabled_tags() { return 0; }
 }
 EOF
 
-g++ -shared -fPIC /tmp/android_build_stubs/android_stub.c -o /tmp/android_build_stubs/libandroid.so
+g++ -shared -fPIC /tmp/android_build_stubs/android_stub.c -o /tmp/android_build_stubs/libandroid.so -ldl
 g++ -shared -fPIC /tmp/android_build_stubs/log_stub.c -o /tmp/android_build_stubs/liblog.so
 g++ -shared -fPIC -I/workspace/include/android_stub /tmp/android_build_stubs/cutils_stub.cpp -o /tmp/android_build_stubs/libcutils.so
 
-# 🚀 5.1 CREAR/CORREGIR EL DLEXT.H COMPATIBLE CON C Y C++
+# 🚀 5.1 CREAR EL DLEXT.H CON CONSTANTES Y DECLARACIONES COMPLETAS
 DLEXT_HEADER="include/android_stub/android/dlext.h"
 mkdir -p "$(dirname "$DLEXT_HEADER")"
 cat << 'EOF' > "$DLEXT_HEADER"
@@ -114,6 +115,14 @@ extern "C" {
 #else
 #include <stdint.h>
 #endif
+
+#define ANDROID_DLEXT_RESERVED_ADDRESS    0x00000001
+#define ANDROID_DLEXT_RESERVED_SIZE       0x00000002
+#define ANDROID_DLEXT_FAST_LOAD           0x00000004
+#define ANDROID_DLEXT_USE_RELRO           0x00000008
+#define ANDROID_DLEXT_USE_LIBRARY_FD      0x00000010
+#define ANDROID_DLEXT_USE_LIBRARY_OFFSET  0x00000020
+#define ANDROID_DLEXT_USE_NAMESPACE       0x00000040
 
 struct android_namespace_t;
 
@@ -130,6 +139,9 @@ struct android_dlextinfo {
     int target_sdk_version;
     int unused1;
 };
+
+void* android_dlopen_ext(const char* filename, int flags, const struct android_dlextinfo* info);
+int android_get_device_api_level(void);
 
 #ifdef __cplusplus
 }
