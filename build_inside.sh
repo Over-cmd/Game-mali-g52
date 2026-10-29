@@ -135,24 +135,10 @@ if [ -f "$DLEXT_HEADER" ]; then
     sed -i 's/void\* library_namespace;/struct android_namespace_t\* library_namespace;/g' "$DLEXT_HEADER"
 fi
 
-# Parche robusto para hilos C11 en src/c11/threads.h
-C11_HEADER="src/c11/threads.h"
-if [ -f "$C11_HEADER" ]; then
-    python3 -c '
-path = "src/c11/threads.h"
-with open(path, "r") as f:
-    content = f.read()
-
-# Evitar redefinición si la glibc ya define call_once/once_flag
-if "void call_once(once_flag *, void (*)(void));" in content:
-    content = content.replace(
-        "void call_once(once_flag *, void (*)(void));",
-        "#ifndef __USE_ISOC11\nvoid call_once(once_flag *, void (*)(void));\n#endif"
-    )
-
-with open(path, "w") as f:
-    f.write(content)
-'
+# Parche para threads_posix.c para evitar incompatibilidad de tipos en pthread_once
+THREADS_POSIX_FILE="src/c11/impl/threads_posix.c"
+if [ -f "$THREADS_POSIX_FILE" ]; then
+    sed -i 's/pthread_once(flag, func);/pthread_once((pthread_once_t *)flag, func);/g' "$THREADS_POSIX_FILE"
 fi
 
 # ⚙️ 10. COMPILACIÓN CON NINJA
