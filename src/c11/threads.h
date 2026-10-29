@@ -118,8 +118,12 @@ typedef pthread_cond_t  cnd_t;
 typedef pthread_t       thrd_t;
 typedef pthread_key_t   tss_t;
 typedef pthread_mutex_t mtx_t;
+
+/* Si la glibc ya declaró once_flag, evitamos redefinirla para prevenir conflictos */
+#  if !defined(__once_flag_defined) && !defined(_GLIBCXX_ONCE_FLAG_DEFINED)
 typedef pthread_once_t  once_flag;
-#  define ONCE_FLAG_INIT PTHREAD_ONCE_INIT
+#    define ONCE_FLAG_INIT PTHREAD_ONCE_INIT
+#  endif
 
 #  ifdef PTHREAD_DESTRUCTOR_ITERATIONS
 #    define TSS_DTOR_ITERATIONS PTHREAD_DESTRUCTOR_ITERATIONS
@@ -149,7 +153,9 @@ enum
 
 /*-------------------------- functions --------------------------*/
 
+#if !defined(__USE_ISOC11)
 void call_once(once_flag *, void (*)(void));
+#endif
 
 int cnd_broadcast(cnd_t *);
 void cnd_destroy(cnd_t *);
