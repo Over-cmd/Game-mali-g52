@@ -48,9 +48,9 @@ cd - > /dev/null
 # 🚀 4. EXPORTAR PYTHONPATH PARA LOS SCRIPTS DE NIR/COMPILER DE MESA
 export PYTHONPATH="/workspace/src/compiler:/workspace/src/compiler/nir:$PYTHONPATH"
 
-# 🚀 5. CREAR STUBS (SIMULADORES) DE LIBANDROID Y LIBLOG PARA LIBADRENOTOOLS
-echo "-> Forjando stubs temporales de libandroid y liblog para libadrenotools..."
-mkdir -p /tmp/android_stub
+# 🚀 5. CREAR STUBS COMPLETOS (LIBRERÍAS Y CABECERAS DE ANDROID) PARA LIBADRENOTOOLS
+echo "-> Forjando stubs de Android (librerías y cabeceras dlext.h) para libadrenotools..."
+mkdir -p /tmp/android_stub/android
 
 # Stub para libandroid.so
 cat << 'EOF' > /tmp/android_stub/android_stub.c
@@ -59,7 +59,7 @@ void AAssetManager_fromJava() {}
 EOF
 gcc -shared -fPIC /tmp/android_stub/android_stub.c -o /tmp/android_stub/libandroid.so
 
-# Stub para liblog.so (necesario para __android_log_print y variantes)
+# Stub para liblog.so
 cat << 'EOF' > /tmp/android_stub/log_stub.c
 int __android_log_print(int prio, const char *tag, const char *fmt, ...) { return 0; }
 void __android_log_write() {}
@@ -67,8 +67,27 @@ void __android_log_assert() {}
 EOF
 gcc -shared -fPIC /tmp/android_stub/log_stub.c -o /tmp/android_stub/liblog.so
 
+# Cabecera simulada android/dlext.h para linkernsbypass
+cat << 'EOF' > /tmp/android_stub/android/dlext.h
+#pragma once
+#define ANDROID_DLEXT_RESERVED 0
+#define ANDROID_DLEXT_RESERVED_ADDRESS 0
+struct android_dlextinfo {
+    unsigned long flags;
+    void* reserved_addr;
+    unsigned long reserved_size;
+    int relro_fd;
+    int library_fd;
+    unsigned long library_offset;
+    unsigned long low_addr;
+    unsigned long high_addr;
+    int target_sdk_version;
+};
+EOF
+
 export LDFLAGS="-L/tmp/android_stub $LDFLAGS"
 export CFLAGS="-I/tmp/android_stub $CFLAGS"
+export CXXFLAGS="-I/tmp/android_stub $CXXFLAGS"
 
 # 🛠️ 6. LIMPIAR DIRECTORIO DE COMPILACIÓN ANTERIOR DE MESA
 rm -rf "${BUILD_DIR}"
