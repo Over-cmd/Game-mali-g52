@@ -21,8 +21,21 @@ apt-get install -y -qq \
     libzstd-dev \
     build-essential || true
 
-# 🚀 2. CONFIGURAR PKG_CONFIG_PATH PARA QUE MESON ENCUENTRE LIBDRM Y X11
-export PKG_CONFIG_PATH="/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig:/usr/local/lib/pkgconfig"
+# 🚀 2. CONFIGURACIÓN DINÁMICA DE PKG_CONFIG_PATH SEGÚN LA ARQUITECTURA
+ARCH=$(uname -m)
+if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+    MULTIARCH_PATH="/usr/lib/aarch64-linux-gnu/pkgconfig"
+elif [ "$ARCH" = "x86_64" ]; then
+    MULTIARCH_PATH="/usr/lib/x86_64-linux-gnu/pkgconfig"
+else
+    MULTIARCH_PATH="/usr/lib/pkgconfig"
+fi
+
+export PKG_CONFIG_PATH="$MULTIARCH_PATH:/usr/share/pkgconfig:/usr/local/lib/pkgconfig"
+export PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1
+export PKG_CONFIG_ALLOW_SYSTEM_LIBS=1
+
+echo "-> Usando PKG_CONFIG_PATH: $PKG_CONFIG_PATH"
 
 # 🚀 3. EXPORTAR PYTHONPATH PARA LOS SCRIPTS DE NIR/COMPILER DE MESA
 export PYTHONPATH="/workspace/src/compiler:/workspace/src/compiler/nir:$PYTHONPATH"
