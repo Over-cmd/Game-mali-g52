@@ -49,7 +49,7 @@ cd - > /dev/null
 export PYTHONPATH="/workspace/src/compiler:/workspace/src/compiler/nir:$PYTHONPATH"
 
 # 🚀 5. CREAR STUBS COMPLETOS (LIBRERÍAS Y CABECERAS DE ANDROID) PARA LIBADRENOTOOLS
-echo "-> Forjando stubs de Android (librerías y cabeceras dlext.h) para libadrenotools..."
+echo "-> Forjando stubs de Android (librerías, dlext.h y log.h) para libadrenotools..."
 mkdir -p /tmp/android_stub/android
 
 # Stub para libandroid.so
@@ -83,6 +83,28 @@ struct android_dlextinfo {
     unsigned long high_addr;
     int target_sdk_version;
 };
+EOF
+
+# Cabecera simulada android/log.h para los registros
+cat << 'EOF' > /tmp/android_stub/android/log.h
+#pragma once
+#define ANDROID_LOG_UNKNOWN 0
+#define ANDROID_LOG_DEFAULT 1
+#define ANDROID_LOG_VERBOSE 2
+#define ANDROID_LOG_DEBUG   3
+#define ANDROID_LOG_INFO    4
+#define ANDROID_LOG_WARN    5
+#define ANDROID_LOG_ERROR   6
+#define ANDROID_LOG_FATAL   7
+#define ANDROID_LOG_SILENT  8
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+int __android_log_print(int prio, const char* tag, const char* fmt, ...);
+#ifdef __cplusplus
+}
+#endif
 EOF
 
 export LDFLAGS="-L/tmp/android_stub $LDFLAGS"
