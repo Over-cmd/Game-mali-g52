@@ -239,6 +239,21 @@ with open(path, "w") as f:
 '
 fi
 
+# Inyectar includes necesarios en spirv_patcher.hpp
+SPIRV_PATCHER_HEADER="src/vulkan/wrapper/spirv_patcher.hpp"
+if [ -f "$SPIRV_PATCHER_HEADER" ]; then
+    python3 -c '
+path = "src/vulkan/wrapper/spirv_patcher.hpp"
+with open(path, "r") as f:
+    content = f.read()
+includes = "#include <cstdint>\n#include <cstddef>\n#include <unordered_map>\n"
+if "#include <cstdint>" not in content:
+    content = includes + content
+with open(path, "w") as f:
+    f.write(content)
+'
+fi
+
 # ⚙️ 10. COMPILACIÓN CON NINJA
 echo "-> Ejecutando compilación del wrapper Vulkan y el puente Mali..."
 ninja -C "${BUILD_DIR}"
