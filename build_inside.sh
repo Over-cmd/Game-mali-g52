@@ -3,7 +3,7 @@ set -e
 
 BUILD_DIR="${1:-${BUILD_DIR:-build}}"
 
-# 🚀 INSTALAR DEPENDENCIAS FALTANTES EN EL CONTENEDOR DE GITHUB ACTIONS
+# 🚀 1. INSTALAR TODAS LAS DEPENDENCIAS DE DESARROLLO EN EL CONTENEDOR DE GITHUB ACTIONS
 echo "-> Verificando e instalando dependencias de desarrollo necesarias..."
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq || true
@@ -18,15 +18,29 @@ apt-get install -y -qq \
     libxshmfence-dev \
     pkg-config \
     zlib1g-dev \
-    libzstd-dev || true
+    libzstd-dev \
+    build-essential || true
 
-# 🚀 EXPORTAR PYTHONPATH PARA LOS SCRIPTS DE NIR/COMPILER DE MESA
+# 🚀 2. EXPORTAR PYTHONPATH PARA LOS SCRIPTS DE NIR/COMPILER DE MESA
 export PYTHONPATH="/workspace/src/compiler:/workspace/src/compiler/nir:$PYTHONPATH"
 
-# 🛠️ LIMPIAR DIRECTORIO DE COMPILACIÓN ANTERIOR
+# 🚀 3. CREAR EL STUB (SIMULADOR) DE LIBANDROID PARA QUE LIBADRENOTOOLS (PUENTE MALI) COMPILE PERFECTAMENTE
+echo "-> Forjando stub temporal de libandroid para libadrenotools..."
+mkdir -p /tmp/android_stub
+cat << 'EOF' > /tmp/android_stub/android_stub.c
+void AConfiguration_fromAssetManager() {}
+void AAssetManager_fromJava() {}
+EOF
+gcc -shared -fPIC /tmp/android_stub/android_stub.c -o /tmp/android_stub/libandroid.so
+export LDFLAGS="-L/tmp/android_stub $LDFLAGS"
+export CFLAGS="-I/tmp/android_stub $CFLAGS"
+
+# 🛠️ 4. LIMPIAR DIRECTORIO DE COMPILACIÓN ANTERIOR
 rm -rf "${BUILD_DIR}"
 
-# 🟢 CONFIGURACIÓN CON MESON (Nativo para Linux X11 / Winlator Bionic)
+# 🟢 5. CONFIGURACIÓN CON MESON (Nativo para Linux X11 / Winlator Bionic con soporte completo)
+meson subprojects download || true
+
 meson setup "${BUILD_DIR}" \
 -Db_sanitize=none \
 -Db_lundef=true \
@@ -44,11 +58,11 @@ meson setup "${BUILD_DIR}" \
 -Dzlib=enabled \
 -Dzstd=enabled
 
-# ⚙️ COMPILACIÓN CON NINJA
-echo "-> Ejecutando compilación del wrapper Vulkan para Winlator Bionic..."
+# ⚙️ 6. COMPILACIÓN CON NINJA
+echo "-> Ejecutando compilación del wrapper Vulkan y el puente Mali..."
 ninja -C "${BUILD_DIR}"
 
-# 🟢 EXTRACCIÓN DEL BINARIO DEL WRAPPER
+# 🟢 7. EXTRACCIÓN DEL BINARIO DEL WRAPPER
 python3 -c '
 import os, shutil
 
@@ -78,10 +92,10 @@ else:
     exit(1)
 '
 
-# 🟢 STRIP DE SÍMBOLOS
+# 🟢 8. STRIP DE SÍMBOLOS
 strip --strip-unneeded -o "${BUILD_DIR}/libvulkan_wrapper.so" "${BUILD_DIR}/libvulkan_wrapper.so.unstripped"
 
-# 🟢 ÁRBOL DE DIRECTORIOS RÍGIDO CON ICD RELATIVO (Formato Bannerlator)
+# 🟢 9. ÁRBOL DE DIRECTORIOS RÍGIDO CON ICD RELATIVO (Formato Bannerlator)
 ROOTFS_DIR="${BUILD_DIR}/rootfs_export"
 rm -rf "${ROOTFS_DIR}"
 mkdir -p "${ROOTFS_DIR}/usr/lib"
@@ -109,7 +123,7 @@ cat << 'EOF' > "${ROOTFS_DIR}/usr/share/vulkan/icd.d/wrapper_icd.json"
 }
 EOF
 
-# 🟢 EMPAQUETADO TAR.ZST PARA BANNERLATOR
+# 🟢 10. EMPAQUETADO TAR.ZST PARA BANNERLATOR
 echo "-> Forjando el paquete comprimido gamenative_driver_rootfs.tar.zst..."
 cd "${ROOTFS_DIR}"
 tar -cvf - usr | zstd -o "../gamenative_driver_rootfs.tar.zst"
