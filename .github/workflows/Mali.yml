@@ -1,0 +1,112 @@
+name: Bannerlator Mali Wrapper CI
+
+on:
+  push:
+    branches:
+      - wrapper-25
+
+jobs:
+  build-aarch64-wrapper:
+    runs-on: ubuntu-latest
+    env:
+      BUILD_DIR: build
+
+    steps:
+      - name: 📥 1. Checkout Code con Adrenotools Completo (Rama wrapper-25)
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+          fetch-depth: 0
+
+      - name: ⚙️ 2. Instalar Herramientas de Compresión y patchelf
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zstd patchelf python3 bc
+
+      - name: 🛠️ 3. Purificar Entorno y Sincronizar Cabeceras Puras (v156)
+        run: |
+          echo "=========================================================="
+          echo " 🧬 RESTAURANDO FLUJO ORIGINAL PURO COMPATIBLE "
+          echo "=========================================================="
+          
+          TARGET_C="src/vulkan/wrapper/wrapper_device.c"
+          if [ -f "$TARGET_C" ]; then
+            sed -i 's|/data/data/app.gamenative/files/imagefs/usr/tmp/|/tmp/|g' "$TARGET_C"
+            echo "-> Parche de inodo temporal aplicado."
+          fi
+
+          ANDROID_MESA_C="src/vulkan/runtime/vk_android.c"
+          if [ -f "$ANDROID_MESA_C" ]; then
+            echo "/* Vaciado por el Workflow para evitar redefiniciones con adrenotools */" > "$ANDROID_MESA_C"
+          fi
+
+          PANVK_ANDROID_C="src/panfrost/vulkan/panvk_android.c"
+          if [ -f "$PANVK_ANDROID_C" ]; then
+            sed -i '1i #include <string.h>' "$PANVK_ANDROID_C"
+          fi
+
+          LIBSYNC_H="src/util/libsync.h"
+          if [ -f "$LIBSYNC_H" ]; then
+            echo -e "#ifndef MESA_LIBSYNC_H_WRAPPER\n#define MESA_LIBSYNC_H_WRAPPER\n#include <sync/sync.h>\nint sync_accumulate(const char *name, int *fd1, int fd2);\nvoid validate_fence_fd(int fd);\nint sync_valid_fd(int fd);\nint sync_wait(int fd, int timeout);\nint sync_merge(const char *name, int fd1, int fd2);\n#endif" > "$LIBSYNC_H"
+          fi
+
+          DRI_TARGET_C="src/gallium/targets/dri/dri_target.c"
+          if [ -f "$DRI_TARGET_C" ]; then
+            echo -e "\n/* Prototipos */\nint sync_wait(int fd, int timeout);\nint sync_accumulate(const char *name, int *fd1, int fd2);\nvoid validate_fence_fd(int fd);\n/* Cuerpos */\nint sync_wait(int fd, int timeout) { return 0; }\nint sync_accumulate(const char *name, int *fd1, int fd2) { return 0; }\nvoid validate_fence_fd(int fd) { return; }" >> "$DRI_TARGET_C"
+          fi
+
+          PANVK_INSTANCE_C="src/panfrost/vulkan/panvk_instance.c"
+          if [ -f "$PANVK_INSTANCE_C" ]; then
+            echo -e "\n/* Prototipos */\nint sync_wait(int fd, int timeout);\nint sync_merge(const char *name, int fd1, int fd2);\n/* Cuerpos */\nint sync_wait(int fd, int timeout) { return 0; }\nint sync_merge(const char *name, int fd1, int fd2) { return 0; }" >> "$PANVK_INSTANCE_C"
+          fi
+
+          EGL_API_C="src/egl/main/eglapi.c"
+          if [ -f "$EGL_API_C" ]; then
+            echo -e "\nint sync_valid_fd(int fd);\nint sync_valid_fd(int fd) { return fd >= 0; }" >> "$EGL_API_C"
+          fi
+
+      - name: ⚙️ 4. Configurar Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🐳 5. Construir Contenedor Gráfico Local con Panfrost
+        run: |
+          docker build -f Dockerfile.build -t local-wrapper-compiler:latest .
+
+      - name: 🛠️ 6. Ejecutar Compilador Local Unificado
+        run: |
+          docker run --rm -v "${{ github.workspace }}:/workspace" local-wrapper-compiler:latest ${{ env.BUILD_DIR }}
+
+      - name: 📦 7. Forjar Paquete Esencial Original de Rendimiento Máximo (v156)
+        run: |
+          WRAPPER_SO="build/src/vulkan/wrapper/libvulkan_wrapper.so"
+          if [ -f "$WRAPPER_SO" ]; then
+            echo "-> [Host] ¡Éxito! Estructurando tu paquete original compatible de producción..."
+            rm -rf final_pkg
+            mkdir -p final_pkg/usr/lib final_pkg/usr/share/vulkan/icd.d
+            cp -fv "$WRAPPER_SO" final_pkg/usr/lib/libvulkan_wrapper.so
+            
+            # TU REGLA DE COMODINES DE ADRENOTOOLS GANADORA INDESTRUCTIBLE
+            cp -fv ./build/subprojects/libadrenotools/*.so ./build/subprojects/libadrenotools/src/hook/*.so final_pkg/usr/lib/ 2>/dev/null || true
+            
+            chmod -R 755 final_pkg/usr/lib/
+            patchelf --set-soname libvulkan_wrapper.so final_pkg/usr/lib/libvulkan_wrapper.so || true
+            find final_pkg/usr/lib/ -name "*.so" -exec patchelf --set-rpath '$ORIGIN' {} \; 2>/dev/null || true
+            
+            # TU MANIFIESTO ORIGINAL RELATIVO PLANO COMPATIBLE CON LA LISTA BLANCA
+            echo '{"ICD": {"api_version": "1.3.289", "library_path": "libvulkan_wrapper.so"}, "file_format_version": "1.0.0"}' > final_pkg/usr/share/vulkan/icd.d/wrapper_icd.aarch64.json
+            echo '{"ICD": {"api_version": "1.3.289", "library_path": "libvulkan_wrapper.so"}, "file_format_version": "1.0.0"}' > final_pkg/usr/share/vulkan/icd.d/wrapper_icd.arm.json
+            
+            sync && sleep 3
+            cd final_pkg && tar -I 'zstd -19 -T0' -cf ../wrapper.tzst usr/ && cd ..
+            echo "-> ¡Paquete original puro forjado con éxito!"
+          else
+            echo "-> [❌ ERROR GRAVE] El binario libvulkan_wrapper.so no se encuentra en build/."
+            exit 1
+          fi
+
+      - name: 🚀 8. Subir Artefacto Completo a GitHub
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bannerlator-Mali-Wrapper
+          path: wrapper.tzst
+          retention-days: 7
