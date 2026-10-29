@@ -3,59 +3,14 @@ set -e
 
 BUILD_DIR="${1:-${BUILD_DIR:-build}}"
 
-# 🚀 EXPORTAR PYTHONPATH PARA QUE LOS SCRIPTS DE PYTHON ENCUENTREN LOS MÓDULOS DE NIR Y MESA
+# 🚀 EXPORTAR PYTHONPATH PARA LOS SCRIPTS DE NIR/COMPILER DE MESA
 export PYTHONPATH="/workspace/src/compiler:/workspace/src/compiler/nir:$PYTHONPATH"
 
-# 🚀 RUTAS Y CONFIGURACIÓN DEL NDK R30
-NDK_DIR=$(find /home/builder/lib -maxdepth 2 -name "android-ndk*" 2>/dev/null | head -n 1)
-if [ -z "$NDK_DIR" ]; then
-    NDK_DIR="/home/builder/lib/android-ndk-r30"
-fi
-NDK_SYSROOT="${NDK_DIR}/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
-
-# Exportaciones de enlaces limpios para X11
-export CFLAGS="$CFLAGS -I/data/data/com.termux/files/usr/include -I/data/data/com.termux/files/usr/include/libdrm"
-export LDFLAGS="$LDFLAGS -L/data/data/com.termux/files/usr/lib -ldrm -lxcb -lxcb-randr -lxcb-xfixes -lX11 -lX11-xcb"
-
-# 🛠️ PARCHE INDUSTRIAL PARA EVITAR EL BLOQUEO DE PLATAFORMA EN UTILS DE MESA
-sed -i 's/#error unexpected platform in os_misc.c/\/\/ #error unexpected platform in os_misc.c/g' src/util/os_misc.c 2>/dev/null || true
-sed -i 's/#error unexpected platform in os_sysinfo.c/\/\/ #error unexpected platform in os_sysinfo.c/g' src/util/os_sysinfo.c 2>/dev/null || true
-
-# 🛠️ CREAR ARCHIVO DE COMPILACIÓN CRUZADA (CROSS FILE)
+# 🛠️ LIMPIAR DIRECTORIO DE COMPILACIÓN ANTERIOR
 rm -rf "${BUILD_DIR}"
-LOCAL_CROSS_FILE="${BUILD_DIR}_cross_file.txt"
-rm -f "${LOCAL_CROSS_FILE}"
 
-cat << EOF > "${LOCAL_CROSS_FILE}"
-[binaries]
-c = '${NDK_SYSROOT}/../bin/aarch64-linux-android30-clang'
-cpp = '${NDK_SYSROOT}/../bin/aarch64-linux-android30-clang++'
-ar = '${NDK_SYSROOT}/../bin/llvm-ar'
-strip = '${NDK_SYSROOT}/../bin/llvm-strip'
-pkgconfig = 'pkg-config'
-
-[host_machine]
-system = 'android'
-cpu_family = 'aarch64'
-cpu = 'armv8-a'
-endian = 'little'
-
-[properties]
-c_args = ['-D_GNU_SOURCE', '-D__ANDROID__', '-DHAVE_FFSLL=0', '-I/workspace/workspace_headers', '-I${NDK_SYSROOT}/usr/include', '-I${NDK_SYSROOT}/usr/include/aarch64-linux-android', '-I/data/data/com.termux/files/usr/include', '-I/data/data/com.termux/files/usr/include/libdrm', '-DVK_USE_PLATFORM_XLIB_KHR=1', '-DVK_USE_PLATFORM_XCB_KHR=1']
-cpp_args = ['-D_GNU_SOURCE', '-D__ANDROID__', '-DHAVE_FFSLL=0', '-I/workspace/workspace_headers', '-I${NDK_SYSROOT}/usr/include', '-I${NDK_SYSROOT}/usr/include/aarch64-linux-android', '-I/data/data/com.termux/files/usr/include', '-I/data/data/com.termux/files/usr/include/libdrm', '-DVK_USE_PLATFORM_XLIB_KHR=1', '-DVK_USE_PLATFORM_XCB_KHR=1']
-link_args = ['-nodefaultlibs', '-lc++', '-lc++abi', '-lm', '-ldl', '-lc', '-lgcc', '-L/data/data/com.termux/files/usr/lib', '-L${NDK_SYSROOT}/usr/lib/aarch64-linux-android/30', '-L${NDK_SYSROOT}/usr/lib/aarch64-linux-android', '-Wl,--sysroot=${NDK_SYSROOT}', '-ldrm', '-lxcb', '-lxcb-randr', '-lxcb-xfixes', '-lX11', '-lX11-xcb']
-EOF
-
-# 🚀 CONFIGURAR EL ENTORNO DE PKG-CONFIG PARA QUE ENCUENTRE LIBRERÍAS
-export PKG_CONFIG_PATH=""
-export PKG_CONFIG_LIBDIR="/data/data/com.termux/files/usr/lib/pkgconfig:/data/data/com.termux/files/usr/share/pkgconfig"
-export PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1
-export PKG_CONFIG_ALLOW_SYSTEM_LIBS=1
-
-# 🟢 CONFIGURACIÓN CON MESON (Exclusivo X11 y wrapper)
-meson subprojects download || true
-
-meson setup "${BUILD_DIR}" --cross-file "${LOCAL_CROSS_FILE}" \
+# 🟢 CONFIGURACIÓN CON MESON (Nativo para Linux X11 / Winlator Bionic)
+meson setup "${BUILD_DIR}" \
 -Db_sanitize=none \
 -Db_lundef=true \
 -Dcpp_rtti=false \
@@ -69,13 +24,11 @@ meson setup "${BUILD_DIR}" --cross-file "${LOCAL_CROSS_FILE}" \
 -Dvulkan-drivers=wrapper \
 -Degl=enabled \
 -Dglx=disabled \
--Dandroid-stub=false \
--Dplatform-sdk-version=30 \
 -Dzlib=enabled \
 -Dzstd=enabled
 
 # ⚙️ COMPILACIÓN CON NINJA
-echo "-> Ejecutando compilación del wrapper para X11 con Ninja..."
+echo "-> Ejecutando compilación del wrapper Vulkan para Winlator Bionic..."
 ninja -C "${BUILD_DIR}"
 
 # 🟢 EXTRACCIÓN DEL BINARIO DEL WRAPPER
@@ -102,20 +55,16 @@ if not src and candidates:
 
 if src and os.path.exists(src):
     shutil.copy2(src, dst)
-    print(f"-> [Forja Real] Driver wrapper X11 localizado en {src}")
+    print(f"-> [Forja Real] Driver wrapper localizado en {src}")
 else:
     print("-> [❌ ERROR CRÍTICO] No se encontró el binario del wrapper.")
     exit(1)
 '
 
-# 🟢 LIMPIEZA DE SÍMBOLOS CON LLVM-STRIP
-STRIP="${NDK_DIR}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
-if [ ! -f "$STRIP" ]; then
-    STRIP=$(find "${NDK_DIR}" -name "llvm-strip" | head -n 1)
-fi
-$STRIP --strip-unneeded -o "${BUILD_DIR}/libvulkan_wrapper.so" "${BUILD_DIR}/libvulkan_wrapper.so.unstripped"
+# 🟢 STRIP DE SÍMBOLOS
+strip --strip-unneeded -o "${BUILD_DIR}/libvulkan_wrapper.so" "${BUILD_DIR}/libvulkan_wrapper.so.unstripped"
 
-# 🟢 ÁRBOL DE DIRECTORIOS RÍGIDO CON ICD RELATIVO PARA X11
+# 🟢 ÁRBOL DE DIRECTORIOS RÍGIDO CON ICD RELATIVO (Formato Bannerlator)
 ROOTFS_DIR="${BUILD_DIR}/rootfs_export"
 rm -rf "${ROOTFS_DIR}"
 mkdir -p "${ROOTFS_DIR}/usr/lib"
@@ -123,6 +72,7 @@ mkdir -p "${ROOTFS_DIR}/usr/share/vulkan/icd.d"
 
 cp "${BUILD_DIR}/libvulkan_wrapper.so" "${ROOTFS_DIR}/usr/lib/libvulkan_wrapper.so"
 
+# Copiar subproyectos compilados si existen (como zstd u otros)
 python3 -c '
 import os, shutil
 build_dir = "'"${BUILD_DIR}"'"
@@ -143,7 +93,7 @@ cat << 'EOF' > "${ROOTFS_DIR}/usr/share/vulkan/icd.d/wrapper_icd.json"
 }
 EOF
 
-# 🟢 EMPAQUETADO TAR.ZST
+# 🟢 EMPAQUETADO TAR.ZST PARA BANNERLATOR
 echo "-> Forjando el paquete comprimido gamenative_driver_rootfs.tar.zst..."
 cd "${ROOTFS_DIR}"
 tar -cvf - usr | zstd -o "../gamenative_driver_rootfs.tar.zst"
@@ -152,5 +102,5 @@ cd - > /dev/null
 cp "${BUILD_DIR}/gamenative_driver_rootfs.tar.zst" ./gamenative_driver_rootfs.tar.zst
 
 echo "=========================================================="
-echo " 🟢 FORJA MESA 25 (X11) EXITOSA: ¡WRAPPER Y MANIFIESTO LISTOS! "
+echo " 🟢 FORJA WINLATOR BIONIC EXITOSA: ¡ROOTFS LISTO!          "
 echo "=========================================================="
