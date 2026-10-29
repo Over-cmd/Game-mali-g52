@@ -102,12 +102,18 @@ g++ -shared -fPIC /tmp/android_build_stubs/android_stub.c -o /tmp/android_build_
 g++ -shared -fPIC /tmp/android_build_stubs/log_stub.c -o /tmp/android_build_stubs/liblog.so
 g++ -shared -fPIC -I/workspace/include/android_stub /tmp/android_build_stubs/cutils_stub.cpp -o /tmp/android_build_stubs/libcutils.so
 
-# 🚀 5.1 CREAR EL DLEXT.H CON CONSTANTES Y DECLARACIONES COMPLETAS
+# 🚀 5.1 CREAR EL DLEXT.H CORREGIDO CON OFF64_T Y TYPEDEF
 DLEXT_HEADER="include/android_stub/android/dlext.h"
 mkdir -p "$(dirname "$DLEXT_HEADER")"
 cat << 'EOF' > "$DLEXT_HEADER"
 #ifndef ANDROID_DLEXT_H
 #define ANDROID_DLEXT_H
+
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
+#include <sys/types.h>
 
 #ifdef __cplusplus
 #include <cstdint>
@@ -126,7 +132,7 @@ extern "C" {
 
 struct android_namespace_t;
 
-struct android_dlextinfo {
+typedef struct android_dlextinfo {
     uint64_t flags;
     void* reserved_addr;
     size_t reserved_size;
@@ -138,9 +144,9 @@ struct android_dlextinfo {
     uint64_t reserved2;
     int target_sdk_version;
     int unused1;
-};
+} android_dlextinfo;
 
-void* android_dlopen_ext(const char* filename, int flags, const struct android_dlextinfo* info);
+void* android_dlopen_ext(const char* filename, int flags, const android_dlextinfo* info);
 int android_get_device_api_level(void);
 
 #ifdef __cplusplus
