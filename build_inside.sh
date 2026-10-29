@@ -42,7 +42,7 @@ rm -rf /tmp/android_external_libdrm
 git clone --depth 1 https://github.com/waydroid/android_external_libdrm -b lineage-20 /tmp/android_external_libdrm
 cd /tmp/android_external_libdrm
 rm -rf build_libdrm
-meson setup build_libdrm --prefix=/usr/local -Dlibdrm=true -Dvalgrind=disabled -Dudev=false
+meson setup build_libdrm --prefix=/usr/local -Dvalgrind=disabled -Dudev=false
 ninja -C build_libdrm install
 cd - > /dev/null
 
