@@ -212,7 +212,6 @@ for root, dirs, files in os.walk("."):
     for file in files:
         if file == "bcenabler.cpp":
             path = os.path.join(root, file)
-            print(f"-> Vaciando bcenabler.cpp en: {path}")
             with open(path, "w") as f:
                 f.write("// Vaciado para evitar instrucciones ARM isb en x86_64\n")
 '
@@ -220,11 +219,23 @@ for root, dirs, files in os.walk("."):
 # Neutralizar wsi_common_android.c
 WSI_ANDROID_FILE="src/vulkan/wsi/wsi_common_android.c"
 if [ -f "$WSI_ANDROID_FILE" ]; then
-    echo "-> Neutralizando wsi_common_android.c para build X11..."
     python3 -c '
 path = "src/vulkan/wsi/wsi_common_android.c"
 with open(path, "w") as f:
     f.write("/* Vaciado para compatibilidad con wrapper X11/Adrenotools */\n")
+'
+fi
+
+# Resolver conflicto de buffer_handle_t con native_handle.h
+NATIVE_HANDLE_HEADER="include/android_stub/cutils/native_handle.h"
+if [ -f "$NATIVE_HANDLE_HEADER" ]; then
+    python3 -c '
+path = "include/android_stub/cutils/native_handle.h"
+with open(path, "r") as f:
+    content = f.read()
+content = content.replace("typedef const native_handle_t* buffer_handle_t;", "/* typedef omitido por conflicto con Vulkan */")
+with open(path, "w") as f:
+    f.write(content)
 '
 fi
 
