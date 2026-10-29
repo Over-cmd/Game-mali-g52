@@ -48,7 +48,7 @@ cd - > /dev/null
 # 🚀 4. EXPORTAR PYTHONPATH PARA LOS SCRIPTS DE NIR/COMPILER DE MESA
 export PYTHONPATH="/workspace/src/compiler:/workspace/src/compiler/nir:$PYTHONPATH"
 
-# 🚀 5. COMPILAR LOS STUBS DE ANDROID AMPLIADOS (Incluye android_dlopen_ext y api_level)
+# 🚀 5. COMPILAR LOS STUBS DE ANDROID AMPLIADOS
 echo "-> Compilando librerías de stubs de Android ampliadas..."
 mkdir -p /tmp/android_build_stubs
 
@@ -101,6 +101,43 @@ g++ -shared -fPIC /tmp/android_build_stubs/android_stub.c -o /tmp/android_build_
 g++ -shared -fPIC /tmp/android_build_stubs/log_stub.c -o /tmp/android_build_stubs/liblog.so
 g++ -shared -fPIC -I/workspace/include/android_stub /tmp/android_build_stubs/cutils_stub.cpp -o /tmp/android_build_stubs/libcutils.so
 
+# 🚀 5.1 CREAR/CORREGIR EL DLEXT.H COMPATIBLE CON C Y C++
+DLEXT_HEADER="include/android_stub/android/dlext.h"
+mkdir -p "$(dirname "$DLEXT_HEADER")"
+cat << 'EOF' > "$DLEXT_HEADER"
+#ifndef ANDROID_DLEXT_H
+#define ANDROID_DLEXT_H
+
+#ifdef __cplusplus
+#include <cstdint>
+extern "C" {
+#else
+#include <stdint.h>
+#endif
+
+struct android_namespace_t;
+
+struct android_dlextinfo {
+    uint64_t flags;
+    void* reserved_addr;
+    size_t reserved_size;
+    int relro_fd;
+    int library_fd;
+    off64_t library_offset;
+    struct android_namespace_t* library_namespace;
+    uint64_t reserved1;
+    uint64_t reserved2;
+    int target_sdk_version;
+    int unused1;
+};
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* ANDROID_DLEXT_H */
+EOF
+
 # 🚀 6. CONFIGURAR RUTAS HACIA LOS STUBS Y FLAGS
 export LDFLAGS="-L/tmp/android_build_stubs -L/workspace/src/android_stub $LDFLAGS"
 export CFLAGS="-I/workspace/include/android_stub -D__STDC_NO_THREADS__=1 $CFLAGS"
@@ -139,11 +176,6 @@ fi
 KGSL_HEADER="subprojects/libadrenotools/src/hook/kgsl.h"
 if [ -f "$KGSL_HEADER" ]; then
     sed -i '1i #ifndef __user\n#define __user\n#endif' "$KGSL_HEADER"
-fi
-
-DLEXT_HEADER="include/android_stub/android/dlext.h"
-if [ -f "$DLEXT_HEADER" ]; then
-    sed -i 's/void\* library_namespace;/struct android_namespace_t\* library_namespace;/g' "$DLEXT_HEADER"
 fi
 
 THREADS_POSIX_FILE="src/c11/impl/threads_posix.c"
