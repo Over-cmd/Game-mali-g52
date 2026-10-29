@@ -3,13 +3,19 @@ set -e
 
 BUILD_DIR="${1:-${BUILD_DIR:-build}}"
 
+# 🚀 INSTALAR DEPENDENCIAS FALTANTES EN BIONIC SI NO ESTÁN PRESENTES
+echo "-> Verificando e instalando dependencias de desarrollo necesarias..."
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -qq || true
+apt-get install -y -qq libdrm-dev libx11-dev libxcb-randr0-dev libxfixes-dev libx11-xcb-dev pkg-config zlib1g-dev libzstd-dev || true
+
 # 🚀 EXPORTAR PYTHONPATH PARA LOS SCRIPTS DE NIR/COMPILER DE MESA
 export PYTHONPATH="/workspace/src/compiler:/workspace/src/compiler/nir:$PYTHONPATH"
 
 # 🛠️ LIMPIAR DIRECTORIO DE COMPILACIÓN ANTERIOR
 rm -rf "${BUILD_DIR}"
 
-# 🟢 CONFIGURACIÓN CON MESON (Nativo para Linux X11 / Winlator Bionic sin EGL innecesario)
+# 🟢 CONFIGURACIÓN CON MESON (Nativo para Linux X11 / Winlator Bionic)
 meson setup "${BUILD_DIR}" \
 -Db_sanitize=none \
 -Db_lundef=true \
@@ -72,7 +78,6 @@ mkdir -p "${ROOTFS_DIR}/usr/share/vulkan/icd.d"
 
 cp "${BUILD_DIR}/libvulkan_wrapper.so" "${ROOTFS_DIR}/usr/lib/libvulkan_wrapper.so"
 
-# Copiar subproyectos compilados si existen (como zstd u otros)
 python3 -c '
 import os, shutil
 build_dir = "'"${BUILD_DIR}"'"
