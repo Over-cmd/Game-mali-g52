@@ -9,7 +9,7 @@ sed -i 's/archive.ubuntu.com/old-releases.ubuntu.com/g' /etc/apt/sources.list 2>
 sed -i 's/security.ubuntu.com/old-releases.ubuntu.com/g' /etc/apt/sources.list 2>/dev/null || true
 sed -i '/deb-src/d' /etc/apt/sources.list 2>/dev/null || true
 
-# 🚀 1. INSTALAR DEPENDENCIAS BÁSICAS Y DE DESARROLLO DEL SISTEMA (CON ALLOW-CHANGE-HELD-PACKAGES)
+# 🚀 1. INSTALAR DEPENDENCIAS BÁSICAS Y DE DESARROLLO DEL SISTEMA
 echo "-> Verificando e instalando dependencias de desarrollo necesarias..."
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
@@ -48,14 +48,25 @@ cd - > /dev/null
 # 🚀 4. EXPORTAR PYTHONPATH PARA LOS SCRIPTS DE NIR/COMPILER DE MESA
 export PYTHONPATH="/workspace/src/compiler:/workspace/src/compiler/nir:$PYTHONPATH"
 
-# 🚀 5. CREAR EL STUB (SIMULADOR) DE LIBANDROID PARA QUE LIBADRENOTOOLS COMPILE PERFECTAMENTE
-echo "-> Forjando stub temporal de libandroid para libadrenotools..."
+# 🚀 5. CREAR STUBS (SIMULADORES) DE LIBANDROID Y LIBLOG PARA LIBADRENOTOOLS
+echo "-> Forjando stubs temporales de libandroid y liblog para libadrenotools..."
 mkdir -p /tmp/android_stub
+
+# Stub para libandroid.so
 cat << 'EOF' > /tmp/android_stub/android_stub.c
 void AConfiguration_fromAssetManager() {}
 void AAssetManager_fromJava() {}
 EOF
 gcc -shared -fPIC /tmp/android_stub/android_stub.c -o /tmp/android_stub/libandroid.so
+
+# Stub para liblog.so (necesario para __android_log_print y variantes)
+cat << 'EOF' > /tmp/android_stub/log_stub.c
+int __android_log_print(int prio, const char *tag, const char *fmt, ...) { return 0; }
+void __android_log_write() {}
+void __android_log_assert() {}
+EOF
+gcc -shared -fPIC /tmp/android_stub/log_stub.c -o /tmp/android_stub/liblog.so
+
 export LDFLAGS="-L/tmp/android_stub $LDFLAGS"
 export CFLAGS="-I/tmp/android_stub $CFLAGS"
 
