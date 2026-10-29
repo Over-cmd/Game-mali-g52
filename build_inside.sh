@@ -3,17 +3,17 @@ set -e
 
 BUILD_DIR="${1:-${BUILD_DIR:-build}}"
 
-# 🚀 0. CORREGIR REPOSITORIOS DE UBIONIC BIONIC (EOL -> OLD-RELEASES)
+# 🚀 0. CORREGIR REPOSITORIOS DE UBUNTU BIONIC (EOL -> OLD-RELEASES)
 echo "-> Actualizando fuentes de APT para Ubuntu Bionic (Old-Releases)..."
 sed -i 's/archive.ubuntu.com/old-releases.ubuntu.com/g' /etc/apt/sources.list 2>/dev/null || true
 sed -i 's/security.ubuntu.com/old-releases.ubuntu.com/g' /etc/apt/sources.list 2>/dev/null || true
 sed -i '/deb-src/d' /etc/apt/sources.list 2>/dev/null || true
 
-# 🚀 1. INSTALAR DEPENDENCIAS BÁSICAS Y DE DESARROLLO DEL SISTEMA (SIN SILENCIAR ERRORES CRÍTICOS)
+# 🚀 1. INSTALAR DEPENDENCIAS BÁSICAS Y DE DESARROLLO DEL SISTEMA (CON ALLOW-CHANGE-HELD-PACKAGES)
 echo "-> Verificando e instalando dependencias de desarrollo necesarias..."
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq \
+apt-get install -y -qq --allow-change-held-packages \
     git \
     ninja-build \
     libx11-dev \
