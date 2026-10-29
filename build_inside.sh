@@ -15,6 +15,7 @@ apt-get install -y -qq \
     libx11-xcb-dev \
     libxcb-dri3-dev \
     libxcb-present-dev \
+    libxshmfence-dev \
     pkg-config \
     zlib1g-dev \
     libzstd-dev || true
