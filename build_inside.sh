@@ -3,7 +3,7 @@ set -e
 
 BUILD_DIR="${1:-${BUILD_DIR:-build}}"
 
-# 🚀 1. INSTALAR DEPENDENCIAS BÁSICAS DEL SISTEMA
+# 🚀 1. INSTALAR DEPENDENCIAS BÁSICAS Y DE DESARROLLO DEL SISTEMA
 echo "-> Verificando e instalando dependencias de desarrollo necesarias..."
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq || true
@@ -16,6 +16,7 @@ apt-get install -y -qq \
     libx11-xcb-dev \
     libxcb-dri3-dev \
     libxcb-present-dev \
+    libxcb-randr0-dev \
     libxshmfence-dev \
     pkg-config \
     zlib1g-dev \
