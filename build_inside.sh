@@ -13,9 +13,9 @@ if [ -z "$NDK_DIR" ]; then
 fi
 NDK_SYSROOT="${NDK_DIR}/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
 
-# Exportaciones generales de AAudio y enlaces
-export CFLAGS="$CFLAGS -laaudio -I/data/data/com.termux/files/usr/include -I/data/data/com.termux/files/usr/include/libdrm"
-export LDFLAGS="$LDFLAGS -laaudio -L/data/data/com.termux/files/usr/lib -ldrm -lxcb -lxcb-randr -lxcb-xfixes -lX11 -lX11-xcb"
+# Exportaciones de enlaces limpios para X11
+export CFLAGS="$CFLAGS -I/data/data/com.termux/files/usr/include -I/data/data/com.termux/files/usr/include/libdrm"
+export LDFLAGS="$LDFLAGS -L/data/data/com.termux/files/usr/lib -ldrm -lxcb -lxcb-randr -lxcb-xfixes -lX11 -lX11-xcb"
 
 # 🛠️ PARCHE INDUSTRIAL PARA EVITAR EL BLOQUEO DE PLATAFORMA EN UTILS DE MESA
 sed -i 's/#error unexpected platform in os_misc.c/\/\/ #error unexpected platform in os_misc.c/g' src/util/os_misc.c 2>/dev/null || true
@@ -41,43 +41,41 @@ cpu = 'armv8-a'
 endian = 'little'
 
 [properties]
-c_args = ['-D_GNU_SOURCE', '-D__ANDROID__', '-DHAVE_FFSLL=0', '-I/workspace/workspace_headers', '-I${NDK_SYSROOT}/usr/include', '-I${NDK_SYSROOT}/usr/include/aarch64-linux-android', '-I/data/data/com.termux/files/usr/include', '-I/data/data/com.termux/files/usr/include/libdrm', '-DVK_USE_PLATFORM_ANDROID_KHR=1']
-cpp_args = ['-D_GNU_SOURCE', '-D__ANDROID__', '-DHAVE_FFSLL=0', '-I/workspace/workspace_headers', '-I${NDK_SYSROOT}/usr/include', '-I${NDK_SYSROOT}/usr/include/aarch64-linux-android', '-I/data/data/com.termux/files/usr/include', '-I/data/data/com.termux/files/usr/include/libdrm', '-DVK_USE_PLATFORM_ANDROID_KHR=1']
-link_args = ['-nodefaultlibs', '-lc++', '-lc++abi', '-lm', '-ldl', '-lc', '-lgcc', '-L/data/data/com.termux/files/usr/lib', '-L${NDK_SYSROOT}/usr/lib/aarch64-linux-android/30', '-L${NDK_SYSROOT}/usr/lib/aarch64-linux-android', '-Wl,--sysroot=${NDK_SYSROOT}', '-ldrm', '-lxcb', '-lxcb-randr', '-lxcb-xfixes', '-lX11', '-lX11-xcb', '-laaudio']
+c_args = ['-D_GNU_SOURCE', '-D__ANDROID__', '-DHAVE_FFSLL=0', '-I/workspace/workspace_headers', '-I${NDK_SYSROOT}/usr/include', '-I${NDK_SYSROOT}/usr/include/aarch64-linux-android', '-I/data/data/com.termux/files/usr/include', '-I/data/data/com.termux/files/usr/include/libdrm', '-DVK_USE_PLATFORM_XLIB_KHR=1', '-DVK_USE_PLATFORM_XCB_KHR=1']
+cpp_args = ['-D_GNU_SOURCE', '-D__ANDROID__', '-DHAVE_FFSLL=0', '-I/workspace/workspace_headers', '-I${NDK_SYSROOT}/usr/include', '-I${NDK_SYSROOT}/usr/include/aarch64-linux-android', '-I/data/data/com.termux/files/usr/include', '-I/data/data/com.termux/files/usr/include/libdrm', '-DVK_USE_PLATFORM_XLIB_KHR=1', '-DVK_USE_PLATFORM_XCB_KHR=1']
+link_args = ['-nodefaultlibs', '-lc++', '-lc++abi', '-lm', '-ldl', '-lc', '-lgcc', '-L/data/data/com.termux/files/usr/lib', '-L${NDK_SYSROOT}/usr/lib/aarch64-linux-android/30', '-L${NDK_SYSROOT}/usr/lib/aarch64-linux-android', '-Wl,--sysroot=${NDK_SYSROOT}', '-ldrm', '-lxcb', '-lxcb-randr', '-lxcb-xfixes', '-lX11', '-lX11-xcb']
 EOF
 
-# 🚀 CONFIGURAR EL ENTORNO DE PKG-CONFIG PARA QUE ENCUENTRE LIBDRM EN TERMUX
+# 🚀 CONFIGURAR EL ENTORNO DE PKG-CONFIG PARA QUE ENCUENTRE LIBRERÍAS
 export PKG_CONFIG_PATH=""
 export PKG_CONFIG_LIBDIR="/data/data/com.termux/files/usr/lib/pkgconfig:/data/data/com.termux/files/usr/share/pkgconfig"
 export PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1
 export PKG_CONFIG_ALLOW_SYSTEM_LIBS=1
 
-# 🟢 CONFIGURACIÓN CON MESON
+# 🟢 CONFIGURACIÓN CON MESON (Exclusivo X11 y wrapper)
 meson subprojects download || true
 
 meson setup "${BUILD_DIR}" --cross-file "${LOCAL_CROSS_FILE}" \
 -Db_sanitize=none \
 -Db_lundef=true \
 -Dcpp_rtti=false \
--Dgbm=enabled \
 -Dopengl=true \
 -Dllvm=disabled \
 -Dshared-llvm=disabled \
--Dplatforms=x11,android \
--Degl-native-platform=android \
--Dgallium-drivers=panfrost \
+-Dplatforms=x11 \
+-Dgallium-drivers= \
 -Ddraw-use-llvm=false \
 -Dxmlconfig=disabled \
--Dvulkan-drivers=panfrost,wrapper \
+-Dvulkan-drivers=wrapper \
 -Degl=enabled \
 -Dglx=disabled \
--Dandroid-stub=true \
+-Dandroid-stub=false \
 -Dplatform-sdk-version=30 \
 -Dzlib=enabled \
 -Dzstd=enabled
 
 # ⚙️ COMPILACIÓN CON NINJA
-echo "-> Ejecutando compilación completa con Ninja..."
+echo "-> Ejecutando compilación del wrapper para X11 con Ninja..."
 ninja -C "${BUILD_DIR}"
 
 # 🟢 EXTRACCIÓN DEL BINARIO DEL WRAPPER
@@ -104,7 +102,7 @@ if not src and candidates:
 
 if src and os.path.exists(src):
     shutil.copy2(src, dst)
-    print(f"-> [Forja Real] Driver wrapper localizado en {src}")
+    print(f"-> [Forja Real] Driver wrapper X11 localizado en {src}")
 else:
     print("-> [❌ ERROR CRÍTICO] No se encontró el binario del wrapper.")
     exit(1)
@@ -117,7 +115,7 @@ if [ ! -f "$STRIP" ]; then
 fi
 $STRIP --strip-unneeded -o "${BUILD_DIR}/libvulkan_wrapper.so" "${BUILD_DIR}/libvulkan_wrapper.so.unstripped"
 
-# 🟢 ÁRBOL DE DIRECTORIOS RÍGIDO CON ICD RELATIVO
+# 🟢 ÁRBOL DE DIRECTORIOS RÍGIDO CON ICD RELATIVO PARA X11
 ROOTFS_DIR="${BUILD_DIR}/rootfs_export"
 rm -rf "${ROOTFS_DIR}"
 mkdir -p "${ROOTFS_DIR}/usr/lib"
@@ -135,7 +133,7 @@ for root, dirs, files in os.walk(os.path.join(build_dir, "subprojects")):
             shutil.copy2(os.path.join(root, file), os.path.join(rootfs_lib, file))
 ' 2>/dev/null || true
 
-cat << 'EOF' > "${ROOTFS_DIR}/usr/share/vulkan/icd.d/wrapper_icd.aarch64.json"
+cat << 'EOF' > "${ROOTFS_DIR}/usr/share/vulkan/icd.d/wrapper_icd.json"
 {
     "file_format_version": "1.0.0",
     "ICD": {
@@ -154,5 +152,5 @@ cd - > /dev/null
 cp "${BUILD_DIR}/gamenative_driver_rootfs.tar.zst" ./gamenative_driver_rootfs.tar.zst
 
 echo "=========================================================="
-echo " 🟢 FORJA MESA 25 EXITOSA: ¡WRAPPER Y MANIFIESTO LISTOS! "
+echo " 🟢 FORJA MESA 25 (X11) EXITOSA: ¡WRAPPER Y MANIFIESTO LISTOS! "
 echo "=========================================================="
