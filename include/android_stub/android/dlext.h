@@ -1,5 +1,8 @@
 #pragma once
 
+#include <cstdint>
+#include <sys/types.h>
+
 #define ANDROID_DLEXT_RESERVED          0x00000001
 #define ANDROID_DLEXT_RESERVED_ADDRESS  0x00000002
 #define ANDROID_DLEXT_FROM_FILE         0x00000004
