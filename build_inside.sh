@@ -152,6 +152,17 @@ for root, dirs, files in os.walk("."):
                 f.write("// Vaciado para evitar instrucciones ARM isb en x86_64\n")
 '
 
+# Neutralizar wsi_common_android.c para evitar errores de campos faltantes en WSI
+WSI_ANDROID_FILE="src/vulkan/wsi/wsi_common_android.c"
+if [ -f "$WSI_ANDROID_FILE" ]; then
+    echo "-> Neutralizando wsi_common_android.c para build X11..."
+    python3 -c '
+path = "src/vulkan/wsi/wsi_common_android.c"
+with open(path, "w") as f:
+    f.write("/* Vaciado para compatibilidad con wrapper X11/Adrenotools */\n")
+'
+fi
+
 # ⚙️ 10. COMPILACIÓN CON NINJA
 echo "-> Ejecutando compilación del wrapper Vulkan y el puente Mali..."
 ninja -C "${BUILD_DIR}"
