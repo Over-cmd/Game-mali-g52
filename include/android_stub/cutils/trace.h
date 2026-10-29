@@ -18,7 +18,6 @@
 #define _LIBS_CUTILS_TRACE_H
 
 #include <inttypes.h>
-#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -26,6 +25,12 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <cutils/compiler.h>
+
+#ifdef __cplusplus
+#include <atomic>
+#else
+#include <stdatomic.h>
+#endif
 
 __BEGIN_DECLS
 
@@ -113,7 +118,13 @@ void atrace_set_tracing_enabled(bool enabled);
  * of this header to always call into atrace_setup, in which we call
  * atrace_init unconditionally.
  */
+#ifdef __cplusplus
+}
+extern std::atomic<bool> atrace_is_ready;
+extern "C" {
+#else
 extern atomic_bool atrace_is_ready;
+#endif
 
 /**
  * Set of ATRACE_TAG flags to trace for, initialized to ATRACE_TAG_NOT_READY.
