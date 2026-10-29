@@ -93,10 +93,10 @@ g++ -shared -fPIC /tmp/android_build_stubs/android_stub.c -o /tmp/android_build_
 g++ -shared -fPIC /tmp/android_build_stubs/log_stub.c -o /tmp/android_build_stubs/liblog.so
 g++ -shared -fPIC -I/workspace/include/android_stub /tmp/android_build_stubs/cutils_stub.cpp -o /tmp/android_build_stubs/libcutils.so
 
-# 🚀 6. CONFIGURAR RUTAS HACIA LOS STUBS DEL REPO Y LAS LIBRERÍAS COMPILADAS
+# 🚀 6. CONFIGURAR RUTAS HACIA LOS STUBS Y BARRERAS C11 THREADS
 export LDFLAGS="-L/tmp/android_build_stubs -L/workspace/src/android_stub $LDFLAGS"
-export CFLAGS="-I/workspace/include/android_stub $CFLAGS"
-export CXXFLAGS="-I/workspace/include/android_stub -D_GNU_SOURCE -D__ANDROID__ -D__aarch64__ $CXXFLAGS"
+export CFLAGS="-I/workspace/include/android_stub -D__STDC_NO_THREADS__=1 $CFLAGS"
+export CXXFLAGS="-I/workspace/include/android_stub -D_GNU_SOURCE -D__ANDROID__ -D__aarch64__ -D__STDC_NO_THREADS__=1 $CXXFLAGS"
 
 # 🛠️ 7. LIMPIAR DIRECTORIO DE COMPILACIÓN ANTERIOR DE MESA
 rm -rf "${BUILD_DIR}"
@@ -138,13 +138,6 @@ if [ -f "$DLEXT_HEADER" ]; then
     sed -i 's/void\* library_namespace;/struct android_namespace_t\* library_namespace;/g' "$DLEXT_HEADER"
 fi
 
-# Parche para evitar conflicto de C11 threads con glibc de Bionic
-C11_HEADER="src/c11/threads.h"
-if [ -f "$C11_HEADER" ]; then
-    sed -i 's/typedef pthread_once_t once_flag;/#ifndef __USE_ISOC11\ntypedef pthread_once_t once_flag;\n#endif/' "$C11_HEADER"
-    sed -i 's/void call_once(once_flag \*, void (\*)(void));/#ifndef __USE_ISOC11\nvoid call_once(once_flag *, void (*)(void));\n#endif/' "$C11_HEADER"
-fi
-
 # ⚙️ 10. COMPILACIÓN CON NINJA
 echo "-> Ejecutando compilación del wrapper Vulkan y el puente Mali..."
 ninja -C "${BUILD_DIR}"
@@ -184,40 +177,4 @@ strip --strip-unneeded -o "${BUILD_DIR}/libvulkan_wrapper.so" "${BUILD_DIR}/libv
 
 # 🟢 13. ÁRBOL DE DIRECTORIOS RÍGIDO CON ICD RELATIVO (Formato Bannerlator)
 ROOTFS_DIR="${BUILD_DIR}/rootfs_export"
-rm -rf "${ROOTFS_DIR}"
-mkdir -p "${ROOTFS_DIR}/usr/lib"
-mkdir -p "${ROOTFS_DIR}/usr/share/vulkan/icd.d"
-
-cp "${BUILD_DIR}/libvulkan_wrapper.so" "${ROOTFS_DIR}/usr/lib/libvulkan_wrapper.so"
-
-python3 -c '
-import os, shutil
-build_dir = "'"${BUILD_DIR}"'"
-rootfs_lib = "'"${ROOTFS_DIR}"'/usr/lib"
-for root, dirs, files in os.walk(os.path.join(build_dir, "subprojects")):
-    for file in files:
-        if file.endswith(".so"):
-            shutil.copy2(os.path.join(root, file), os.path.join(rootfs_lib, file))
-' 2>/dev/null || true
-
-cat << 'EOF' > "${ROOTFS_DIR}/usr/share/vulkan/icd.d/wrapper_icd.json"
-{
-    "file_format_version": "1.0.0",
-    "ICD": {
-        "library_path": "libvulkan_wrapper.so",
-        "api_version": "1.3.255"
-    }
-}
-EOF
-
-# 🟢 14. EMPAQUETADO TAR.ZST PARA BANNERLATOR
-echo "-> Forjando el paquete comprimido gamenative_driver_rootfs.tar.zst..."
-cd "${ROOTFS_DIR}"
-tar -cvf - usr | zstd -o "../gamenative_driver_rootfs.tar.zst"
-cd - > /dev/null
-
-cp "${BUILD_DIR}/gamenative_driver_rootfs.tar.zst" ./gamenative_driver_rootfs.tar.zst
-
-echo "=========================================================="
-echo " 🟢 FORJA WINLATOR BIONIC EXITOSA: ¡ROOTFS LISTO!          "
-echo "=========================================================="
+rm -
