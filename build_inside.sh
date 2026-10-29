@@ -23,19 +23,12 @@ apt-get install -y -qq \
     libzstd-dev \
     build-essential || true
 
-# 🚀 2. CONFIGURAR PKG_CONFIG_PATH PARA INCLUIR /usr/local Y RUTAS LOCALES
-ARCH=$(uname -m)
-if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
-    MULTIARCH_PATH="/usr/lib/aarch64-linux-gnu/pkgconfig"
-elif [ "$ARCH" = "x86_64" ]; then
-    MULTIARCH_PATH="/usr/lib/x86_64-linux-gnu/pkgconfig"
-else
-    MULTIARCH_PATH="/usr/lib/pkgconfig"
-fi
-
-export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig:$MULTIARCH_PATH:/usr/share/pkgconfig"
+# 🚀 2. CONFIGURACIÓN EXHAUSTIVA DE PKG_CONFIG_PATH PARA EVITAR FALLOS DE BÚSQUEDA
+export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig"
 export PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1
 export PKG_CONFIG_ALLOW_SYSTEM_LIBS=1
+
+echo "-> PKG_CONFIG_PATH configurado como: $PKG_CONFIG_PATH"
 
 # 🚀 3. COMPILAR E INSTALAR LIBDRM DESDE EL REPO DE WAYDROID (LINEAGE-20)
 echo "-> Clonando y compilando libdrm desde Waydroid (lineage-20)..."
