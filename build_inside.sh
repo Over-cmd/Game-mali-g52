@@ -46,6 +46,12 @@ cpp_args = ['-D_GNU_SOURCE', '-D__ANDROID__', '-DHAVE_FFSLL=0', '-I/workspace/wo
 link_args = ['-nodefaultlibs', '-lc++', '-lc++abi', '-lm', '-ldl', '-lc', '-lgcc', '-L/data/data/com.termux/files/usr/lib', '-L${NDK_SYSROOT}/usr/lib/aarch64-linux-android/30', '-L${NDK_SYSROOT}/usr/lib/aarch64-linux-android', '-Wl,--sysroot=${NDK_SYSROOT}', '-ldrm', '-lxcb', '-lxcb-randr', '-lxcb-xfixes', '-lX11', '-lX11-xcb', '-laaudio']
 EOF
 
+# 🚀 CONFIGURAR EL ENTORNO DE PKG-CONFIG PARA QUE ENCUENTRE LIBDRM EN TERMUX
+export PKG_CONFIG_PATH=""
+export PKG_CONFIG_LIBDIR="/data/data/com.termux/files/usr/lib/pkgconfig:/data/data/com.termux/files/usr/share/pkgconfig"
+export PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1
+export PKG_CONFIG_ALLOW_SYSTEM_LIBS=1
+
 # 🟢 CONFIGURACIÓN CON MESON
 meson subprojects download || true
 
