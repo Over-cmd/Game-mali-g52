@@ -140,7 +140,7 @@ if [ -f "$THREADS_POSIX_FILE" ]; then
     sed -i 's/pthread_once(flag, func);/pthread_once((pthread_once_t *)flag, func);/g' "$THREADS_POSIX_FILE"
 fi
 
-# Parche robusto con Python para eliminar la instrucción 'isb' en bcenabler.cpp
+# Parche flexible con Python para comentar cualquier línea con 'isb' en bcenabler.cpp
 BCENABLER_FILE="subprojects/libadrenotools/src/bcenabler.cpp"
 if [ -f "$BCENABLER_FILE" ]; then
     python3 -c '
@@ -150,8 +150,8 @@ with open(path, "r") as f:
 
 new_lines = []
 for line in lines:
-    if "isb" in line and "__asm__" in line:
-        new_lines.append("    __asm__ __volatile__(\"\" : : : \"memory\");\n")
+    if "isb" in line:
+        new_lines.append("    // " + line.strip() + " // Patcheado para x86_64\n")
     else:
         new_lines.append(line)
 
