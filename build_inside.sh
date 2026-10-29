@@ -239,16 +239,30 @@ with open(path, "w") as f:
 '
 fi
 
-# Inyectar includes necesarios en spirv_patcher.hpp
+# Hacer spirv_patcher.hpp compatible tanto con C como con C++
 SPIRV_PATCHER_HEADER="src/vulkan/wrapper/spirv_patcher.hpp"
 if [ -f "$SPIRV_PATCHER_HEADER" ]; then
     python3 -c '
 path = "src/vulkan/wrapper/spirv_patcher.hpp"
 with open(path, "r") as f:
     content = f.read()
-includes = "#include <cstdint>\n#include <cstddef>\n#include <unordered_map>\n"
-if "#include <cstdint>" not in content:
-    content = includes + content
+
+safe_headers = """#ifdef __cplusplus
+#include <cstdint>
+#include <cstddef>
+#include <unordered_map>
+#else
+#include <stdint.h>
+#include <stddef.h>
+#endif
+"""
+
+content = content.replace("#include <cstdint>", "")
+content = content.replace("#include <cstddef>", "")
+content = content.replace("#include <unordered_map>", "")
+
+content = safe_headers + "\n" + content
+
 with open(path, "w") as f:
     f.write(content)
 '
