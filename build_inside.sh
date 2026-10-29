@@ -48,15 +48,60 @@ cd - > /dev/null
 # 🚀 4. EXPORTAR PYTHONPATH PARA LOS SCRIPTS DE NIR/COMPILER DE MESA
 export PYTHONPATH="/workspace/src/compiler:/workspace/src/compiler/nir:$PYTHONPATH"
 
-# 🚀 5. CONFIGURAR RUTAS HACIA LOS STUBS NATIVOS DEL REPOSITORIO (src/android_stub e include/android_stub)
-export LDFLAGS="-L/workspace/src/android_stub $LDFLAGS"
+# 🚀 5. COMPILAR LOS STUBS DE ANDROID EN UN DIRECTORIO TEMPORAL PARA SATISFACER A MESON
+echo "-> Compilando librerías de stubs de Android (libandroid, liblog, libcutils)..."
+mkdir -p /tmp/android_build_stubs
+
+# Código fuente rápido para libandroid_stub.c
+cat << 'EOF' > /tmp/android_build_stubs/android_stub.c
+extern "C" {
+void AConfiguration_fromAssetManager() {}
+void AAssetManager_fromJava() {}
+}
+EOF
+
+# Código fuente rápido para liblog_stub.c
+cat << 'EOF' > /tmp/android_build_stubs/log_stub.c
+extern "C" {
+int __android_log_print(int, const char*, const char*, ...) { return 0; }
+void __android_log_write() {}
+void __android_log_assert() {}
+}
+EOF
+
+# Código fuente rápido para libcutils_stub.cpp
+cat << 'EOF' > /tmp/android_build_stubs/cutils_stub.cpp
+#include <stdint.h>
+extern "C" {
+int property_get(const char*, char *value, const char *default_value) {
+   if (default_value) {
+       int i = 0;
+       while (default_value[i] != '\0' && i < 91) { value[i] = default_value[i]; i++; }
+       value[i] = '\0';
+       return i;
+   }
+   return 0;
+}
+void atrace_begin_body(const char*) {}
+void atrace_end_body() {}
+void atrace_init() {}
+uint64_t atrace_get_enabled_tags() { return 0; }
+}
+EOF
+
+g++ -shared -fPIC /tmp/android_build_stubs/android_stub.c -o /tmp/android_build_stubs/libandroid.so
+g++ -shared -fPIC /tmp/android_build_stubs/log_stub.c -o /tmp/android_build_stubs/liblog.so
+g++ -shared -fPIC -I/workspace/include/android_stub /tmp/android_build_stubs/cutils_stub.cpp -o /tmp/android_build_stubs/libcutils.so
+
+# 🚀 6. CONFIGURAR RUTAS HACIA LOS STUBS DEL REPO Y LAS LIBRERÍAS COMPILADAS
+export LDFLAGS="-L/tmp/android_build_stubs -L/workspace/src/android_stub $LDFLAGS"
 export CFLAGS="-I/workspace/include/android_stub $CFLAGS"
 export CXXFLAGS="-I/workspace/include/android_stub $CXXFLAGS"
 
-# 🛠️ 6. LIMPIAR DIRECTORIO DE COMPILACIÓN ANTERIOR DE MESA
+# 🛠️ 7. LIMPIAR DIRECTORIO DE COMPILACIÓN ANTERIOR DE MESA
 rm -rf "${BUILD_DIR}"
 
-# 🟢 7. CONFIGURACIÓN CON MESON (Nativo para Linux X11 / Winlator Bionic con soporte completo)
+# 🟢 8. CONFIGURACIÓN CON MESON (Nativo para Linux X11 / Winlator Bionic con soporte completo)
 meson subprojects download || true
 
 meson setup "${BUILD_DIR}" \
@@ -76,11 +121,11 @@ meson setup "${BUILD_DIR}" \
 -Dzlib=enabled \
 -Dzstd=enabled
 
-# ⚙️ 8. COMPILACIÓN CON NINJA
+# ⚙️ 9. COMPILACIÓN CON NINJA
 echo "-> Ejecutando compilación del wrapper Vulkan y el puente Mali..."
 ninja -C "${BUILD_DIR}"
 
-# 🟢 9. EXTRACCIÓN DEL BINARIO DEL WRAPPER
+# 🟢 10. EXTRACCIÓN DEL BINARIO DEL WRAPPER
 python3 -c '
 import os, shutil
 
@@ -110,10 +155,10 @@ else:
     exit(1)
 '
 
-# 🟢 10. STRIP DE SÍMBOLOS
+# 🟢 11. STRIP DE SÍMBOLOS
 strip --strip-unneeded -o "${BUILD_DIR}/libvulkan_wrapper.so" "${BUILD_DIR}/libvulkan_wrapper.so.unstripped"
 
-# 🟢 11. ÁRBOL DE DIRECTORIOS RÍGIDO CON ICD RELATIVO (Formato Bannerlator)
+# 🟢 12. ÁRBOL DE DIRECTORIOS RÍGIDO CON ICD RELATIVO (Formato Bannerlator)
 ROOTFS_DIR="${BUILD_DIR}/rootfs_export"
 rm -rf "${ROOTFS_DIR}"
 mkdir -p "${ROOTFS_DIR}/usr/lib"
@@ -141,7 +186,7 @@ cat << 'EOF' > "${ROOTFS_DIR}/usr/share/vulkan/icd.d/wrapper_icd.json"
 }
 EOF
 
-# 🟢 12. EMPAQUETADO TAR.ZST PARA BANNERLATOR
+# 🟢 13. EMPAQUETADO TAR.ZST PARA BANNERLATOR
 echo "-> Forjando el paquete comprimido gamenative_driver_rootfs.tar.zst..."
 cd "${ROOTFS_DIR}"
 tar -cvf - usr | zstd -o "../gamenative_driver_rootfs.tar.zst"
