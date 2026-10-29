@@ -140,25 +140,16 @@ if [ -f "$THREADS_POSIX_FILE" ]; then
     sed -i 's/pthread_once(flag, func);/pthread_once((pthread_once_t *)flag, func);/g' "$THREADS_POSIX_FILE"
 fi
 
-# Parche global omnidireccional para buscar y limpiar 'isb' en todo el árbol (incluyendo build/)
+# Neutralizar radicalmente bcenabler.cpp vaciándolo por completo
 python3 -c '
 import os
-found = False
 for root, dirs, files in os.walk("."):
     for file in files:
         if file == "bcenabler.cpp":
             path = os.path.join(root, file)
-            print(f"-> Limpiando instrucción isb en: {path}")
-            with open(path, "r") as f:
-                content = f.read()
-            content = content.replace("\"isb\"", "\"\"")
-            content = content.replace("isb;", "// isb removed")
-            content = content.replace("isb", "// isb removed")
+            print(f"-> Vaciando bcenabler.cpp en: {path}")
             with open(path, "w") as f:
-                f.write(content)
-            found = True
-if not found:
-    print("-> ⚠️ Advertencia: No se encontró bcenabler.cpp.")
+                f.write("// Vaciado para evitar instrucciones ARM isb en x86_64\n")
 '
 
 # ⚙️ 10. COMPILACIÓN CON NINJA
