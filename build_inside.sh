@@ -3,10 +3,16 @@ set -e
 
 BUILD_DIR="${1:-${BUILD_DIR:-build}}"
 
-# 🚀 1. INSTALAR DEPENDENCIAS BÁSICAS Y DE DESARROLLO DEL SISTEMA
+# 🚀 0. CORREGIR REPOSITORIOS DE UBIONIC BIONIC (EOL -> OLD-RELEASES)
+echo "-> Actualizando fuentes de APT para Ubuntu Bionic (Old-Releases)..."
+sed -i 's/archive.ubuntu.com/old-releases.ubuntu.com/g' /etc/apt/sources.list 2>/dev/null || true
+sed -i 's/security.ubuntu.com/old-releases.ubuntu.com/g' /etc/apt/sources.list 2>/dev/null || true
+sed -i '/deb-src/d' /etc/apt/sources.list 2>/dev/null || true
+
+# 🚀 1. INSTALAR DEPENDENCIAS BÁSICAS Y DE DESARROLLO DEL SISTEMA (SIN SILENCIAR ERRORES CRÍTICOS)
 echo "-> Verificando e instalando dependencias de desarrollo necesarias..."
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq || true
+apt-get update -qq
 apt-get install -y -qq \
     git \
     ninja-build \
@@ -16,14 +22,13 @@ apt-get install -y -qq \
     libx11-xcb-dev \
     libxcb-dri3-dev \
     libxcb-present-dev \
-    libxcb-randr0-dev \
     libxshmfence-dev \
     pkg-config \
     zlib1g-dev \
     libzstd-dev \
-    build-essential || true
+    build-essential
 
-# 🚀 2. CONFIGURACIÓN EXHAUSTIVA DE PKG_CONFIG_PATH PARA EVITAR FALLOS DE BÚSQUEDA
+# 🚀 2. CONFIGURACIÓN EXHAUSTIVA DE PKG_CONFIG_PATH
 export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig"
 export PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1
 export PKG_CONFIG_ALLOW_SYSTEM_LIBS=1
