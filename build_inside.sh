@@ -67,8 +67,8 @@ meson setup "${BUILD_DIR}" --cross-file "${LOCAL_CROSS_FILE}" \
 -Dglx=disabled \
 -Dandroid-stub=true \
 -Dplatform-sdk-version=30 \
--Dzlib=disabled \
--Dzstd=disabled
+-Dzlib=enabled \
+-Dzstd=enabled
 
 # ⚙️ COMPILACIÓN CON NINJA
 echo "-> Ejecutando compilación completa con Ninja..."
