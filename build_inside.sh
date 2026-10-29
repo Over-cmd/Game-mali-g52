@@ -48,14 +48,25 @@ cd - > /dev/null
 # 🚀 4. EXPORTAR PYTHONPATH PARA LOS SCRIPTS DE NIR/COMPILER DE MESA
 export PYTHONPATH="/workspace/src/compiler:/workspace/src/compiler/nir:$PYTHONPATH"
 
-# 🚀 5. COMPILAR LOS STUBS DE ANDROID EN UN DIRECTORIO TEMPORAL PARA SATISFACER A MESON
-echo "-> Compilando librerías de stubs de Android (libandroid, liblog, libcutils)..."
+# 🚀 5. COMPILAR LOS STUBS DE ANDROID AMPLIADOS (Incluye android_dlopen_ext y api_level)
+echo "-> Compilando librerías de stubs de Android ampliadas..."
 mkdir -p /tmp/android_build_stubs
 
 cat << 'EOF' > /tmp/android_build_stubs/android_stub.c
+#include <stddef.h>
+#include <stdint.h>
+
 extern "C" {
 void AConfiguration_fromAssetManager() {}
 void AAssetManager_fromJava() {}
+
+int android_get_device_api_level() {
+    return 30; // Simulamos Android 11 (API 30)
+}
+
+void* android_dlopen_ext(const char* filename, int flags, const void* info) {
+    return NULL;
+}
 }
 EOF
 
@@ -118,7 +129,7 @@ meson setup "${BUILD_DIR}" \
 -Dzlib=enabled \
 -Dzstd=enabled
 
-# 🚀 9. PARCHES AUTOMÁTICOS DE COMPATIBILIDAD (APLICADOS TRAS MESON SETUP)
+# 🚀 9. PARCHES AUTOMÁTICOS DE COMPATIBILIDAD
 echo "-> Aplicando parches de compatibilidad..."
 ADRENOTOOLS_FILE="subprojects/libadrenotools/lib/linkernsbypass/android_linker_ns.cpp"
 if [ -f "$ADRENOTOOLS_FILE" ]; then
@@ -140,7 +151,7 @@ if [ -f "$THREADS_POSIX_FILE" ]; then
     sed -i 's/pthread_once(flag, func);/pthread_once((pthread_once_t *)flag, func);/g' "$THREADS_POSIX_FILE"
 fi
 
-# Neutralizar radicalmente bcenabler.cpp vaciándolo por completo
+# Neutralizar bcenabler.cpp
 python3 -c '
 import os
 for root, dirs, files in os.walk("."):
@@ -152,7 +163,7 @@ for root, dirs, files in os.walk("."):
                 f.write("// Vaciado para evitar instrucciones ARM isb en x86_64\n")
 '
 
-# Neutralizar wsi_common_android.c para evitar errores de campos faltantes en WSI
+# Neutralizar wsi_common_android.c
 WSI_ANDROID_FILE="src/vulkan/wsi/wsi_common_android.c"
 if [ -f "$WSI_ANDROID_FILE" ]; then
     echo "-> Neutralizando wsi_common_android.c para build X11..."
