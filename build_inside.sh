@@ -14,6 +14,7 @@ apt-get install -y -qq \
     libxfixes-dev \
     libx11-xcb-dev \
     libxcb-dri3-dev \
+    libxcb-present-dev \
     pkg-config \
     zlib1g-dev \
     libzstd-dev || true
