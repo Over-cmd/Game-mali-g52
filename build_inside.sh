@@ -96,7 +96,7 @@ g++ -shared -fPIC -I/workspace/include/android_stub /tmp/android_build_stubs/cut
 # 🚀 6. CONFIGURAR RUTAS HACIA LOS STUBS DEL REPO Y LAS LIBRERÍAS COMPILADAS
 export LDFLAGS="-L/tmp/android_build_stubs -L/workspace/src/android_stub $LDFLAGS"
 export CFLAGS="-I/workspace/include/android_stub $CFLAGS"
-export CXXFLAGS="-I/workspace/include/android_stub $CXXFLAGS"
+export CXXFLAGS="-I/workspace/include/android_stub -D_GNU_SOURCE -D__ANDROID__ -D__aarch64__ $CXXFLAGS"
 
 # 🛠️ 7. LIMPIAR DIRECTORIO DE COMPILACIÓN ANTERIOR DE MESA
 rm -rf "${BUILD_DIR}"
@@ -121,11 +121,18 @@ meson setup "${BUILD_DIR}" \
 -Dzlib=enabled \
 -Dzstd=enabled
 
-# ⚙️ 9. COMPILACIÓN CON NINJA
+# 🚀 9. PARCHE AUTOMÁTICO DE SEGURIDAD PARA LIBADRENOTOOLS
+echo "-> Aplicando parches de compatibilidad a libadrenotools..."
+ADRENOTOOLS_FILE="subprojects/libadrenotools/lib/linkernsbypass/android_linker_ns.cpp"
+if [ -f "$ADRENOTOOLS_FILE" ]; then
+    sed -i '1i #include <climits>\n#include <sys/syscall.h>\n#include <unistd.h>' "$ADRENOTOOLS_FILE"
+fi
+
+# ⚙️ 10. COMPILACIÓN CON NINJA
 echo "-> Ejecutando compilación del wrapper Vulkan y el puente Mali..."
 ninja -C "${BUILD_DIR}"
 
-# 🟢 10. EXTRACCIÓN DEL BINARIO DEL WRAPPER
+# 🟢 11. EXTRACCIÓN DEL BINARIO DEL WRAPPER
 python3 -c '
 import os, shutil
 
@@ -155,10 +162,10 @@ else:
     exit(1)
 '
 
-# 🟢 11. STRIP DE SÍMBOLOS
+# 🟢 12. STRIP DE SÍMBOLOS
 strip --strip-unneeded -o "${BUILD_DIR}/libvulkan_wrapper.so" "${BUILD_DIR}/libvulkan_wrapper.so.unstripped"
 
-# 🟢 12. ÁRBOL DE DIRECTORIOS RÍGIDO CON ICD RELATIVO (Formato Bannerlator)
+# 🟢 13. ÁRBOL DE DIRECTORIOS RÍGIDO CON ICD RELATIVO (Formato Bannerlator)
 ROOTFS_DIR="${BUILD_DIR}/rootfs_export"
 rm -rf "${ROOTFS_DIR}"
 mkdir -p "${ROOTFS_DIR}/usr/lib"
@@ -186,7 +193,7 @@ cat << 'EOF' > "${ROOTFS_DIR}/usr/share/vulkan/icd.d/wrapper_icd.json"
 }
 EOF
 
-# 🟢 13. EMPAQUETADO TAR.ZST PARA BANNERLATOR
+# 🟢 14. EMPAQUETADO TAR.ZST PARA BANNERLATOR
 echo "-> Forjando el paquete comprimido gamenative_driver_rootfs.tar.zst..."
 cd "${ROOTFS_DIR}"
 tar -cvf - usr | zstd -o "../gamenative_driver_rootfs.tar.zst"
