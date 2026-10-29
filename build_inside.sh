@@ -98,7 +98,7 @@ export CXXFLAGS="-I/workspace/include/android_stub -D_GNU_SOURCE -D__ANDROID__ -
 # 🛠️ 7. LIMPIAR DIRECTORIO DE COMPILACIÓN ANTERIOR DE MESA
 rm -rf "${BUILD_DIR}"
 
-# 🟢 8. CONFIGURACIÓN CON MESON (Aquí se descargan y configuran los subproyectos)
+# 🟢 8. CONFIGURACIÓN CON MESON
 meson subprojects download || true
 
 meson setup "${BUILD_DIR}" \
@@ -118,7 +118,7 @@ meson setup "${BUILD_DIR}" \
 -Dzlib=enabled \
 -Dzstd=enabled
 
-# 🚀 9. PARCHES AUTOMÁTICOS DE COMPATIBILIDAD (¡APLICADOS DESPUÉS DE MESON SETUP!)
+# 🚀 9. PARCHES AUTOMÁTICOS DE COMPATIBILIDAD (APLICADOS TRAS MESON SETUP)
 echo "-> Aplicando parches de compatibilidad..."
 ADRENOTOOLS_FILE="subprojects/libadrenotools/lib/linkernsbypass/android_linker_ns.cpp"
 if [ -f "$ADRENOTOOLS_FILE" ]; then
@@ -140,7 +140,7 @@ if [ -f "$THREADS_POSIX_FILE" ]; then
     sed -i 's/pthread_once(flag, func);/pthread_once((pthread_once_t *)flag, func);/g' "$THREADS_POSIX_FILE"
 fi
 
-# Parche omnidireccional para eliminar 'isb' en bcenabler.cpp ahora que ya está descargado por Meson
+# Parche global omnidireccional para buscar y limpiar 'isb' en todo el árbol (incluyendo build/)
 python3 -c '
 import os
 found = False
@@ -151,15 +151,14 @@ for root, dirs, files in os.walk("."):
             print(f"-> Limpiando instrucción isb en: {path}")
             with open(path, "r") as f:
                 content = f.read()
-            # Reemplazar la instrucción isb por nada o una instrucción nula
             content = content.replace("\"isb\"", "\"\"")
-            content = content.replace("isb;", "")
-            content = content.replace("isb", "")
+            content = content.replace("isb;", "// isb removed")
+            content = content.replace("isb", "// isb removed")
             with open(path, "w") as f:
                 f.write(content)
             found = True
 if not found:
-    print("-> ⚠️ Advertencia: No se encontró bcenabler.cpp para parchear.")
+    print("-> ⚠️ Advertencia: No se encontró bcenabler.cpp.")
 '
 
 # ⚙️ 10. COMPILACIÓN CON NINJA
