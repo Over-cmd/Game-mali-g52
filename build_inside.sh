@@ -49,8 +49,9 @@ cd - > /dev/null
 export PYTHONPATH="/workspace/src/compiler:/workspace/src/compiler/nir:$PYTHONPATH"
 
 # 🚀 5. CREAR STUBS COMPLETOS (LIBRERÍAS Y CABECERAS DE ANDROID) PARA LIBADRENOTOOLS
-echo "-> Forjando stubs de Android (librerías, dlext.h y log.h) para libadrenotools..."
+echo "-> Forjando stubs de Android (librerías, dlext.h, log.h y cutils con <atomic>) para libadrenotools..."
 mkdir -p /tmp/android_stub/android
+mkdir -p /tmp/android_stub/cutils
 
 # Stub para libandroid.so
 cat << 'EOF' > /tmp/android_stub/android_stub.c
@@ -67,7 +68,7 @@ void __android_log_assert() {}
 EOF
 gcc -shared -fPIC /tmp/android_stub/log_stub.c -o /tmp/android_stub/liblog.so
 
-# Cabecera simulada android/dlext.h para linkernsbypass
+# Cabecera simulada android/dlext.h
 cat << 'EOF' > /tmp/android_stub/android/dlext.h
 #pragma once
 #define ANDROID_DLEXT_RESERVED 0
@@ -85,7 +86,7 @@ struct android_dlextinfo {
 };
 EOF
 
-# Cabecera simulada android/log.h para los registros
+# Cabecera simulada android/log.h
 cat << 'EOF' > /tmp/android_stub/android/log.h
 #pragma once
 #define ANDROID_LOG_UNKNOWN 0
@@ -104,6 +105,36 @@ extern "C" {
 int __android_log_print(int prio, const char* tag, const char* fmt, ...);
 #ifdef __cplusplus
 }
+#endif
+EOF
+
+# Cabecera simulada cutils/trace.h con soporte atómico completo
+cat << 'EOF' > /tmp/android_stub/cutils/trace.h
+#pragma once
+#include <atomic>
+
+#define ATRACE_TAG 0
+#define ATRACE_TAG_GRAPHICS 0
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+inline bool atrace_is_tag_enabled(unsigned long long) { return false; }
+inline void a_trace_begin(unsigned long long, const char*) {}
+inline void a_trace_end(unsigned long long) {}
+inline void a_trace_async_begin(unsigned long long, const char*, int) {}
+inline void a_trace_async_end(unsigned long long, const char*, int) {}
+
+#ifdef __cplusplus
+}
+#endif
+
+#ifdef __cplusplus
+extern std::atomic_bool atrace_is_ready;
+#else
+#include <stdatomic.h>
+extern atomic_bool atrace_is_ready;
 #endif
 EOF
 
