@@ -21,10 +21,13 @@ apt-get install -y -qq \
     libzstd-dev \
     build-essential || true
 
-# 🚀 2. EXPORTAR PYTHONPATH PARA LOS SCRIPTS DE NIR/COMPILER DE MESA
+# 🚀 2. CONFIGURAR PKG_CONFIG_PATH PARA QUE MESON ENCUENTRE LIBDRM Y X11
+export PKG_CONFIG_PATH="/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig:/usr/local/lib/pkgconfig"
+
+# 🚀 3. EXPORTAR PYTHONPATH PARA LOS SCRIPTS DE NIR/COMPILER DE MESA
 export PYTHONPATH="/workspace/src/compiler:/workspace/src/compiler/nir:$PYTHONPATH"
 
-# 🚀 3. CREAR EL STUB (SIMULADOR) DE LIBANDROID PARA QUE LIBADRENOTOOLS (PUENTE MALI) COMPILE PERFECTAMENTE
+# 🚀 4. CREAR EL STUB (SIMULADOR) DE LIBANDROID PARA QUE LIBADRENOTOOLS COMPILE PERFECTAMENTE
 echo "-> Forjando stub temporal de libandroid para libadrenotools..."
 mkdir -p /tmp/android_stub
 cat << 'EOF' > /tmp/android_stub/android_stub.c
@@ -35,10 +38,10 @@ gcc -shared -fPIC /tmp/android_stub/android_stub.c -o /tmp/android_stub/libandro
 export LDFLAGS="-L/tmp/android_stub $LDFLAGS"
 export CFLAGS="-I/tmp/android_stub $CFLAGS"
 
-# 🛠️ 4. LIMPIAR DIRECTORIO DE COMPILACIÓN ANTERIOR
+# 🛠️ 5. LIMPIAR DIRECTORIO DE COMPILACIÓN ANTERIOR
 rm -rf "${BUILD_DIR}"
 
-# 🟢 5. CONFIGURACIÓN CON MESON (Nativo para Linux X11 / Winlator Bionic con soporte completo)
+# 🟢 6. CONFIGURACIÓN CON MESON (Nativo para Linux X11 / Winlator Bionic con soporte completo)
 meson subprojects download || true
 
 meson setup "${BUILD_DIR}" \
@@ -58,11 +61,11 @@ meson setup "${BUILD_DIR}" \
 -Dzlib=enabled \
 -Dzstd=enabled
 
-# ⚙️ 6. COMPILACIÓN CON NINJA
+# ⚙️ 7. COMPILACIÓN CON NINJA
 echo "-> Ejecutando compilación del wrapper Vulkan y el puente Mali..."
 ninja -C "${BUILD_DIR}"
 
-# 🟢 7. EXTRACCIÓN DEL BINARIO DEL WRAPPER
+# 🟢 8. EXTRACCIÓN DEL BINARIO DEL WRAPPER
 python3 -c '
 import os, shutil
 
@@ -92,10 +95,10 @@ else:
     exit(1)
 '
 
-# 🟢 8. STRIP DE SÍMBOLOS
+# 🟢 9. STRIP DE SÍMBOLOS
 strip --strip-unneeded -o "${BUILD_DIR}/libvulkan_wrapper.so" "${BUILD_DIR}/libvulkan_wrapper.so.unstripped"
 
-# 🟢 9. ÁRBOL DE DIRECTORIOS RÍGIDO CON ICD RELATIVO (Formato Bannerlator)
+# 🟢 10. ÁRBOL DE DIRECTORIOS RÍGIDO CON ICD RELATIVO (Formato Bannerlator)
 ROOTFS_DIR="${BUILD_DIR}/rootfs_export"
 rm -rf "${ROOTFS_DIR}"
 mkdir -p "${ROOTFS_DIR}/usr/lib"
@@ -123,7 +126,7 @@ cat << 'EOF' > "${ROOTFS_DIR}/usr/share/vulkan/icd.d/wrapper_icd.json"
 }
 EOF
 
-# 🟢 10. EMPAQUETADO TAR.ZST PARA BANNERLATOR
+# 🟢 11. EMPAQUETADO TAR.ZST PARA BANNERLATOR
 echo "-> Forjando el paquete comprimido gamenative_driver_rootfs.tar.zst..."
 cd "${ROOTFS_DIR}"
 tar -cvf - usr | zstd -o "../gamenative_driver_rootfs.tar.zst"
