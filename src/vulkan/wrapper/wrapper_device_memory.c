@@ -2,13 +2,13 @@
  * wrapper_device_memory.c
  *
  * Variables de entorno (todas opcionales):
- *   WRAPPER_ION_CACHED=0|1        1 (por defecto): reservas grandes con cache de CPU.
- *                                 0: todo sin cache (juego fluido, videos lentos).
- *   WRAPPER_ION_CACHED_MIN=<n>    tamano minimo en bytes para usar cache (16777216).
- *   WRAPPER_ION_CACHED_MAX=<n>    tamano maximo en bytes para usar cache (sin limite).
- *   WRAPPER_SYNC=0|1              1: sincroniza la cache en cada QueueSubmit
+ *   WRAPPER_ION_CACHED=0|1        1 (por defecto): reservas grandes con caché de CPU.
+ *                                 0: todo sin caché (juego fluido, vídeos lentos).
+ *   WRAPPER_ION_CACHED_MIN=<n>    tamaño mínimo en bytes para usar caché (16777216).
+ *   WRAPPER_ION_CACHED_MAX=<n>    tamaño máximo en bytes para usar caché (sin límite).
+ *   WRAPPER_SYNC=0|1              1: sincroniza la caché en cada QueueSubmit
  *                                 (quita las rayas pero baja mucho los FPS).
- *   WRAPPER_DEBUG_FILE=<ruta>     escribe un log de depuracion en esa ruta.
+ *   WRAPPER_DEBUG_FILE=<ruta>     escribe un log de depuración en esa ruta.
  */
 
 #include "wrapper_private.h"
@@ -76,7 +76,6 @@ dma_heap_alloc(int heap_fd, size_t size) {
    return alloc_data.fd;
 }
 
-// https://cs.android.com/android/kernel/superproject/+/common-android-4.9:common/drivers/staging/android/uapi/ion.h
 struct ion_allocation_data_1 {
 	size_t len;
 	size_t align;
@@ -100,7 +99,6 @@ struct ion_handle_data_1 {
 #define ION_IOC_MAP_1         _IOWR(ION_IOC_MAGIC, 2, struct ion_fd_data_1)
 #define ION_IOC_SHARE_1		   _IOWR(ION_IOC_MAGIC, 4, struct ion_fd_data_1)
 
-// https://cs.android.com/android/kernel/superproject/+/common-android-4.14:common/drivers/staging/android/uapi/ion.h
 struct ion_allocation_data_2 {
    __u64 len;
    __u32 heap_id_mask;
@@ -110,9 +108,9 @@ struct ion_allocation_data_2 {
 };
 
 struct ion_heap_query_2 {
-	__u32 cnt; /* Total number of heaps to be copied */
-	__u32 reserved0; /* align to 64bits */
-	__u64 heaps; /* buffer to be populated */
+	__u32 cnt;
+	__u32 reserved0;
+	__u64 heaps;
 	__u32 reserved1;
 	__u32 reserved2;
 };
@@ -120,7 +118,6 @@ struct ion_heap_query_2 {
 #define ION_IOC_ALLOC_2       _IOWR(ION_IOC_MAGIC, 0, struct ion_allocation_data_2)
 #define ION_IOC_HEAP_QUERY_2     _IOWR(ION_IOC_MAGIC, 8, struct ion_heap_query_2)
 
-/* Devuelve ION_FLAG_CACHED (1) para las reservas grandes, 0 para el resto. */
 static unsigned int wrapper_ion_flags(size_t size) {
    static int init = 0, on = 1;
    static size_t minsz = 16777216, maxsz = (size_t) -1;
@@ -140,7 +137,6 @@ static int
 ion_heap_alloc_2(int heap_fd, size_t size) {
    struct ion_allocation_data_2 alloc_data = {
       .len = size,
-      /* ION_HEAP_SYSTEM | ION_SYSTEM_HEAP_ID (Qcom) */
       .heap_id_mask = (1U << 0) | (1U << 25),
       .flags = wrapper_ion_flags(size),
    };
@@ -175,7 +171,7 @@ ion_heap_alloc(int heap_fd, size_t size) {
    struct ion_allocation_data_1 alloc_data = {
       .len = size,
       .align = 0,
-      .heap_id_mask = (1U << 0) | (1U << 25) /* QCom specific */,
+      .heap_id_mask = (1U << 0) | (1U << 25),
       .flags = wrapper_ion_flags(size),
    };
 
@@ -559,7 +555,7 @@ wrapper_device_memory_from_handle(struct wrapper_device *device,
 }
 
 /* Sincroniza la caché de CPU de las reservas cacheadas. */
-void
+static void
 wrapper_sync_cached_memory(struct wrapper_device *device)
 {
    static int on = -1;
@@ -572,7 +568,7 @@ wrapper_sync_cached_memory(struct wrapper_device *device)
    simple_mtx_lock(&device->resource_mutex);
    list_for_each_entry(struct wrapper_device_memory, m,
                        &device->device_memory_list, link) {
-      if (m->cpu_cached && m->map_address && m->fd >= 0)
+      if (m->map_address && m->fd >= 0)
          ioctl(m->fd, DMA_BUF_IOCTL_SYNC, &sync);
    }
    simple_mtx_unlock(&device->resource_mutex);
@@ -641,7 +637,7 @@ wrapper_mapped_ranges(VkDevice _device, uint32_t count,
          sz = (r->offset < mem->map_size) ? mem->map_size - r->offset : 0;
       bytes[k] += sz;
 
-      if (mem->cpu_cached && mem->map_address && sz) {
+      if (mem->map_address && sz) {
          wrapper_cache_maintain((char *) mem->map_address + r->offset,
                                 (size_t) sz, invalidate);
          cbytes[k] += sz;
@@ -649,9 +645,9 @@ wrapper_mapped_ranges(VkDevice _device, uint32_t count,
 
       if (shown[k] < 8) {
          shown[k]++;
-         wrapper_dbg("%s[%u]: off=%llu size=%llu cached=%d mapped=%d", name,
+         wrapper_dbg("%s[%u]: off=%llu size=%llu mapped=%d", name,
                      shown[k], (unsigned long long) r->offset,
-                     (unsigned long long) sz, mem->cpu_cached,
+                     (unsigned long long) sz,
                      mem->map_address != NULL);
       }
    }
@@ -823,10 +819,7 @@ wrapper_AllocateMemory(VkDevice _device,
       vk_error(device, result);
    } else {
       *pMemory = mem->dispatch_handle;
-      if (mem->fd >= 0 && !mem->ahardware_buffer)
-         mem->cpu_cached = wrapper_ion_flags(pAllocateInfo->allocationSize) != 0;
-      wrapper_dbg("cpu_cached=%d fd=%d size=%llu", mem->cpu_cached, mem->fd,
-                  (unsigned long long) pAllocateInfo->allocationSize);
+      wrapper_dbg("fd=%d size=%llu", mem->fd, (unsigned long long) pAllocateInfo->allocationSize);
    }
 
 out:
