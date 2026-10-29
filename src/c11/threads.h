@@ -8,7 +8,7 @@
  * Permission is hereby granted, free of charge, to any person or organization
  * obtaining a copy of the software and accompanying documentation covered by
  * this license (the "Software") to use, reproduce, display, distribute,
- * execute, and transmit the Software, and to prepare [[derivative work]]s of the
+ * execute, and transmit the Software, and to prepare derivative works of the
  * Software, and to permit third-parties to whom the Software is furnished to
  * do so, all subject to the following:
  *
@@ -118,8 +118,12 @@ typedef pthread_cond_t  cnd_t;
 typedef pthread_t       thrd_t;
 typedef pthread_key_t   tss_t;
 typedef pthread_mutex_t mtx_t;
+
+#  if !defined(__USE_ISOC11) && !defined(__once_flag_defined)
 typedef pthread_once_t  once_flag;
-#  define ONCE_FLAG_INIT PTHREAD_ONCE_INIT
+#    define ONCE_FLAG_INIT PTHREAD_ONCE_INIT
+#  endif
+
 #  ifdef PTHREAD_DESTRUCTOR_ITERATIONS
 #    define TSS_DTOR_ITERATIONS PTHREAD_DESTRUCTOR_ITERATIONS
 #  else
@@ -148,7 +152,10 @@ enum
 
 /*-------------------------- functions --------------------------*/
 
+#if !defined(__USE_ISOC11) && !defined(__once_flag_defined)
 void call_once(once_flag *, void (*)(void));
+#endif
+
 int cnd_broadcast(cnd_t *);
 void cnd_destroy(cnd_t *);
 int cnd_init(cnd_t *);
