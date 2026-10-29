@@ -9,7 +9,7 @@ export PYTHONPATH="/workspace/src/compiler:/workspace/src/compiler/nir:$PYTHONPA
 # 🛠️ LIMPIAR DIRECTORIO DE COMPILACIÓN ANTERIOR
 rm -rf "${BUILD_DIR}"
 
-# 🟢 CONFIGURACIÓN CON MESON (Nativo para Linux X11 / Winlator Bionic)
+# 🟢 CONFIGURACIÓN CON MESON (Nativo para Linux X11 / Winlator Bionic sin EGL innecesario)
 meson setup "${BUILD_DIR}" \
 -Db_sanitize=none \
 -Db_lundef=true \
@@ -22,7 +22,7 @@ meson setup "${BUILD_DIR}" \
 -Ddraw-use-llvm=false \
 -Dxmlconfig=disabled \
 -Dvulkan-drivers=wrapper \
--Degl=enabled \
+-Degl=disabled \
 -Dglx=disabled \
 -Dzlib=enabled \
 -Dzstd=enabled
