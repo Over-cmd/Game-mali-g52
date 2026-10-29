@@ -3,11 +3,20 @@ set -e
 
 BUILD_DIR="${1:-${BUILD_DIR:-build}}"
 
-# 🚀 INSTALAR DEPENDENCIAS FALTANTES EN BIONIC SI NO ESTÁN PRESENTES
+# 🚀 INSTALAR DEPENDENCIAS FALTANTES EN EL CONTENEDOR DE GITHUB ACTIONS
 echo "-> Verificando e instalando dependencias de desarrollo necesarias..."
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq || true
-apt-get install -y -qq libdrm-dev libx11-dev libxcb-randr0-dev libxfixes-dev libx11-xcb-dev pkg-config zlib1g-dev libzstd-dev || true
+apt-get install -y -qq \
+    libdrm-dev \
+    libx11-dev \
+    libxcb-randr0-dev \
+    libxfixes-dev \
+    libx11-xcb-dev \
+    libxcb-dri3-dev \
+    pkg-config \
+    zlib1g-dev \
+    libzstd-dev || true
 
 # 🚀 EXPORTAR PYTHONPATH PARA LOS SCRIPTS DE NIR/COMPILER DE MESA
 export PYTHONPATH="/workspace/src/compiler:/workspace/src/compiler/nir:$PYTHONPATH"
