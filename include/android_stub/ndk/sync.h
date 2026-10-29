@@ -31,6 +31,10 @@
 
 #include <linux/sync_file.h>
 
+#ifndef __INTRODUCED_IN
+#define __INTRODUCED_IN(x)
+#endif
+
 __BEGIN_DECLS
 
 /* Fences indicate the status of an asynchronous task. They are initially
