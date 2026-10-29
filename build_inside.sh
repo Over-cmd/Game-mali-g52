@@ -121,8 +121,8 @@ meson setup "${BUILD_DIR}" \
 -Dzlib=enabled \
 -Dzstd=enabled
 
-# 🚀 9. PARCHE AUTOMÁTICO DE SEGURIDAD PARA LIBADRENOTOOLS
-echo "-> Aplicando parches de compatibilidad a libadrenotools..."
+# 🚀 9. PARCHE AUTOMÁTICO DE SEGURIDAD Y COMPATIBILIDAD
+echo "-> Aplicando parches de compatibilidad..."
 ADRENOTOOLS_FILE="subprojects/libadrenotools/lib/linkernsbypass/android_linker_ns.cpp"
 if [ -f "$ADRENOTOOLS_FILE" ]; then
     sed -i '1i #include <climits>\n#include <sys/syscall.h>\n#include <unistd.h>' "$ADRENOTOOLS_FILE"
@@ -136,6 +136,13 @@ fi
 DLEXT_HEADER="include/android_stub/android/dlext.h"
 if [ -f "$DLEXT_HEADER" ]; then
     sed -i 's/void\* library_namespace;/struct android_namespace_t\* library_namespace;/g' "$DLEXT_HEADER"
+fi
+
+# Parche para evitar conflicto de C11 threads con glibc de Bionic
+C11_HEADER="src/c11/threads.h"
+if [ -f "$C11_HEADER" ]; then
+    sed -i 's/typedef pthread_once_t once_flag;/#ifndef __USE_ISOC11\ntypedef pthread_once_t once_flag;\n#endif/' "$C11_HEADER"
+    sed -i 's/void call_once(once_flag \*, void (\*)(void));/#ifndef __USE_ISOC11\nvoid call_once(once_flag *, void (*)(void));\n#endif/' "$C11_HEADER"
 fi
 
 # ⚙️ 10. COMPILACIÓN CON NINJA
