@@ -128,6 +128,16 @@ if [ -f "$ADRENOTOOLS_FILE" ]; then
     sed -i '1i #include <climits>\n#include <sys/syscall.h>\n#include <unistd.h>' "$ADRENOTOOLS_FILE"
 fi
 
+KGSL_HEADER="subprojects/libadrenotools/src/hook/kgsl.h"
+if [ -f "$KGSL_HEADER" ]; then
+    sed -i '1i #ifndef __user\n#define __user\n#endif' "$KGSL_HEADER"
+fi
+
+DLEXT_HEADER="include/android_stub/android/dlext.h"
+if [ -f "$DLEXT_HEADER" ]; then
+    sed -i 's/void\* library_namespace;/struct android_namespace_t\* library_namespace;/g' "$DLEXT_HEADER"
+fi
+
 # ⚙️ 10. COMPILACIÓN CON NINJA
 echo "-> Ejecutando compilación del wrapper Vulkan y el puente Mali..."
 ninja -C "${BUILD_DIR}"
