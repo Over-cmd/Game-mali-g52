@@ -135,10 +135,14 @@ if [ -f "$DLEXT_HEADER" ]; then
     sed -i 's/void\* library_namespace;/struct android_namespace_t\* library_namespace;/g' "$DLEXT_HEADER"
 fi
 
-# Parche para threads_posix.c para evitar incompatibilidad de tipos en pthread_once
 THREADS_POSIX_FILE="src/c11/impl/threads_posix.c"
 if [ -f "$THREADS_POSIX_FILE" ]; then
     sed -i 's/pthread_once(flag, func);/pthread_once((pthread_once_t *)flag, func);/g' "$THREADS_POSIX_FILE"
+fi
+
+BCENABLER_FILE="subprojects/libadrenotools/src/bcenabler.cpp"
+if [ -f "$BCENABLER_FILE" ]; then
+    sed -i 's/__asm__ __volatile__("isb" : : : "memory");/__asm__ __volatile__("" : : : "memory");/g' "$BCENABLER_FILE"
 fi
 
 # ⚙️ 10. COMPILACIÓN CON NINJA
