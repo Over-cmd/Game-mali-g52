@@ -40,6 +40,10 @@
 #include <android/hardware_buffer.h>
 #include <android/rect.h>
 
+#ifndef __INTRODUCED_IN
+#define __INTRODUCED_IN(x)
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
