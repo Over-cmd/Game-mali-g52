@@ -506,16 +506,25 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
                WRAPPER_LOG(info, "Faking VK_KHR_pipeline_library");
                pdevice->vk.supported_extensions.KHR_pipeline_library = true;
             }
+
+            pdevice->vk.supported_extensions.EXT_image_robustness = true;
+            pdevice->vk.supported_extensions.EXT_index_type_uint8 = true;
+            pdevice->vk.supported_extensions.KHR_8bit_storage = true;
+            pdevice->vk.supported_extensions.KHR_16bit_storage = true;
+            pdevice->vk.supported_extensions.KHR_shader_float16_int8 = true;
+            pdevice->vk.supported_extensions.EXT_scalar_block_layout = true;
+            pdevice->vk.supported_extensions.KHR_buffer_device_address = true;
+            pdevice->vk.supported_extensions.KHR_shader_subgroup_extended_types = true;
+            pdevice->vk.supported_extensions.EXT_shader_subgroup_ballot = true;
+            pdevice->vk.supported_extensions.EXT_texture_compression_astc_hdr = true;
+            pdevice->vk.supported_extensions.EXT_depth_clip_enable = true;
+            pdevice->vk.supported_extensions.EXT_custom_border_color = true;
             
             /* --- FORZAR CARACTERÍSTICAS FALTANTES EN MALI PARA ZINK/DXVK --- */
             supported_features->logicOp = true;
             supported_features->fillModeNonSolid = true;
             supported_features->shaderClipDistance = true;
             supported_features->shaderCullDistance = true;
-            
-            pdevice->vk.supported_extensions.EXT_depth_clip_enable = true;
-            pdevice->vk.supported_extensions.EXT_custom_border_color = true;
-            
             supported_features->depthClipEnable = true;
             supported_features->extendedDynamicState = true;
             supported_features->extendedDynamicState2 = true;
@@ -759,6 +768,8 @@ wrapper_GetPhysicalDeviceFeatures(VkPhysicalDevice physicalDevice,
    pFeatures->shaderStorageImageWriteWithoutFormat = true;
    pFeatures->independentBlend = true;
    pFeatures->variableMultisampleRate = false;
+   pFeatures->depthClipEnable = true;
+   pFeatures->shaderStorageImageMultisample = true;
 }
 
 VKAPI_ATTR void VKAPI_CALL
@@ -839,6 +850,8 @@ wrapper_GetPhysicalDeviceFeatures2(VkPhysicalDevice physicalDevice,
    pFeatures->features.shaderStorageImageWriteWithoutFormat = true;
    pFeatures->features.independentBlend = true;
    pFeatures->features.variableMultisampleRate = false;
+   pFeatures->features.depthClipEnable = true;
+   pFeatures->features.shaderStorageImageMultisample = true;
 }
 
 VKAPI_ATTR void VKAPI_CALL
@@ -1375,7 +1388,7 @@ wrapper_GetPhysicalDeviceFormatProperties2(VkPhysicalDevice physicalDevice,
    case VK_FORMAT_BC2_SRGB_BLOCK:
    case VK_FORMAT_BC3_UNORM_BLOCK:
    case VK_FORMAT_BC3_SRGB_BLOCK:
-   caseVK_FORMAT_BC4_UNORM_BLOCK:
+   case VK_FORMAT_BC4_UNORM_BLOCK:
    case VK_FORMAT_BC4_SNORM_BLOCK:
    case VK_FORMAT_BC5_UNORM_BLOCK:
    case VK_FORMAT_BC5_SNORM_BLOCK:
