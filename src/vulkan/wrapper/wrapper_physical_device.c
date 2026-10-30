@@ -729,9 +729,6 @@ wrapper_GetPhysicalDeviceFeatures2(VkPhysicalDevice physicalDevice,
    VK_FROM_HANDLE(wrapper_physical_device, pdevice, physicalDevice);
    vk_common_GetPhysicalDeviceFeatures2(physicalDevice, pFeatures);
 
-   /* Forzar globalmente logicOp tanto en la estructura principal como en features */
-   pFeatures->features.logicOp = VK_TRUE;
-
    if (pdevice->driver_properties.driverID == VK_DRIVER_ID_ARM_PROPRIETARY &&
        pdevice->vk.supported_extensions.EXT_robustness2) {
       vk_foreach_struct(s, pFeatures->pNext) {
@@ -778,6 +775,9 @@ wrapper_GetPhysicalDeviceFeatures2(VkPhysicalDevice physicalDevice,
             ((VkPhysicalDeviceMaintenance5Features *)s)->maintenance5 = VK_TRUE;
       }
    }
+
+   /* FORZAR AL FINAL DE TODO PARA EVITAR QUE SE SOBREESCRIBA */
+   pFeatures->features.logicOp = VK_TRUE;
 }
 
 VKAPI_ATTR void VKAPI_CALL
