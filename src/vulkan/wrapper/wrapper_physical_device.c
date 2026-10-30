@@ -44,6 +44,11 @@ wrapper_effective_api_version(struct wrapper_physical_device *pdevice,
    uint32_t requested = parse_vk_version_from_env();
    const char *engine = pdevice->instance->vk.app_info.engine_name;
 
+   /* A wrapper may need to expose a raised API version to one compatibility
+    * layer while leaving another on the base driver's ABI. Select such an
+    * override by the exact VkApplicationInfo engine name rather than a vendor,
+    * device, or substring allowlist. Both variables are required, so the
+    * default remains the global WRAPPER_VK_VERSION behavior. */
    const char *override_engine = getenv("WRAPPER_ENGINE_NAME");
    if (engine && override_engine && !strcmp(engine, override_engine)) {
       uint32_t engine_override =
@@ -84,6 +89,8 @@ get_driver_version(const uint32_t driverVersion)
 	return driver_version;
 }
 
+/* DXVK 2.5+ uploads textures on a family without graphics when one exists;
+ * Xclipse 960 loses those uploads. Keep DXVK on the graphics queue. */
 static void
 wrapper_hide_compute_queue_families(struct wrapper_physical_device *pdevice)
 {
@@ -146,14 +153,10 @@ wrapper_setup_device_extensions(struct wrapper_physical_device *pdevice) {
 
 static void
 wrapper_apply_device_extension_blacklist(struct wrapper_physical_device *physical_device) {
-   char *env_blacklist = getenv("WRAPPER_EXTENSION_BLACKLIST");
-   if (!env_blacklist)
+   char *blacklist = getenv("WRAPPER_EXTENSION_BLACKLIST");
+   if (!blacklist)
       return;
-   char *blacklist_copy = strdup(env_blacklist);
-   if (!blacklist_copy)
-      return;
-   char *saveptr = NULL;
-   char *extension = strtok_r(blacklist_copy, ",", &saveptr);
+   char *extension = strtok(blacklist, ",");
    while (extension != NULL) {
       for (int i = 0; i < VK_DEVICE_EXTENSION_COUNT; i++) {
          if (strstr(extension, vk_device_extensions[i].extensionName)) {
@@ -161,9 +164,8 @@ wrapper_apply_device_extension_blacklist(struct wrapper_physical_device *physica
             physical_device->vk.supported_extensions.extensions[i] = false;
          }
       }
-      extension = strtok_r(NULL, ",", &saveptr);
+      extension = strtok(NULL, ",");
    }
-   free(blacklist_copy);
 }
 
 static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
@@ -208,6 +210,9 @@ wrapper_setup_coherent_memory_types(struct wrapper_physical_device *pdevice)
    }
 }
 
+/* Auto mode: a BC format the base driver can sample and copy into in optimal
+ * tiling is used natively even without textureCompressionBC (PowerVR exposes
+ * BC1-BC5 that way); the rest are emulated, on every driver alike. */
 static void
 wrapper_probe_native_bcn(struct wrapper_physical_device *pdevice)
 {
@@ -271,7 +276,6 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
       
    if (result!= VK_SUCCESS) {
       WRAPPER_LOG(error, "Failed to enumerate physical devices, res %d", result);	
-      free(physical_devices);
       return result;
    }
    
@@ -281,10 +285,8 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
 
       pdevice = vk_zalloc(&_instance->alloc, sizeof(*pdevice), 8,
                           VK_SYSTEM_ALLOCATION_SCOPE_INSTANCE);
-      if (!pdevice) {
-         free(physical_devices);
+      if (!pdevice)
          return VK_ERROR_OUT_OF_HOST_MEMORY;
-      }
 
       struct vk_physical_device_dispatch_table dispatch_table;
       vk_physical_device_dispatch_table_from_entrypoints(
@@ -300,7 +302,6 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
                                        &dispatch_table);
       if (result != VK_SUCCESS) {
          vk_free(&_instance->alloc, pdevice);
-         free(physical_devices);
          return result;
       }
 
@@ -344,7 +345,10 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
       supported_features->fillModeNonSolid = true;
       supported_features->shaderClipDistance = true;
       supported_features->shaderCullDistance = true;
-
+      /* Hidden capabilities cannot be inferred from a vendor ID, and exposing
+       * a new extension can change client feature selection. Keep this generic
+       * emulation opt-in and activate it only when the base driver lacks the
+       * native extension. */
       pdevice->emulate_imageless_framebuffer =
          getenv("WRAPPER_EMULATE_IMAGELESS_FRAMEBUFFER") &&
          atoi(getenv("WRAPPER_EMULATE_IMAGELESS_FRAMEBUFFER")) &&
@@ -371,7 +375,6 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
       if (result != VK_SUCCESS) {
          vk_physical_device_finish(&pdevice->vk);
          vk_free(&_instance->alloc, pdevice);
-         free(physical_devices);
          return result;
       }
       pdevice->vk.wsi_device = &pdevice->wsi_device;
@@ -387,6 +390,9 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
       pdevice->dispatch_table.GetPhysicalDeviceProperties2(
          pdevice->dispatch_handle, &pdevice->properties2);
 
+      /* Only DXVK needs the raised limit; vkd3d-proton works within the real
+       * one. The raised limit is not real storage: DXVK's independent GPL
+       * layouts push 224 bytes and overrun the driver's command buffer. */
       const char *engine = pdevice->instance->vk.app_info.engine_name;
       pdevice->raises_push_constant_limit =
          pdevice->driver_properties.driverID == VK_DRIVER_ID_SAMSUNG_PROPRIETARY &&
@@ -399,6 +405,9 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
          pdevice->vk.supported_extensions.EXT_graphics_pipeline_library = false;
       }
 
+      /* Raising the reported core version above the base ICD requires
+       * substantial lowering. Keep it opt-in and select it from the actual API
+       * gap, not from a vendor ID. */
       pdevice->emulate_vulkan13 =
          wrapper_core13_wanted(pdevice, instance->vk.app_info.engine_name);
       if (pdevice->emulate_vulkan13)
@@ -429,6 +438,13 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
       const uint32_t engine_version = instance->vk.app_info.engine_version;
       const uint32_t driver_version = pdevice->properties2.properties.driverVersion;
 
+      /* DXVK forces hostQueryReset on from D3D_FEATURE_LEVEL_9_1 up, so a driver
+       * without it gets no D3D11 device at any level.  Gated on the driver
+       * rather than on the engine name: the base-lacks guard already limits
+       * this to drivers that need it, and the default is on only for the driver
+       * it was validated against.  WRAPPER_EMULATE_HOST_QUERY_RESET is the
+       * tri-state override -- unset follows the driver default, true opts
+       * another driver in, false is the kill switch. */
       const bool nvidia_proprietary =
          pdevice->driver_properties.driverID == VK_DRIVER_ID_NVIDIA_PROPRIETARY;
 
@@ -441,6 +457,8 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
          supported_features->hostQueryReset = true;
       }
 
+      /* HACK: Specific prop drivers workarounds for Adreno and Mali GPUs */
+      
       if (pdevice->driver_properties.driverID == VK_DRIVER_ID_QUALCOMM_PROPRIETARY) {
          if (strstr(engine_name, "DXVK")) {
             WRAPPER_LOG(info, "Disabling VK_EXT_line_rasterization");
@@ -480,6 +498,12 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
             supported_features->dualSrcBlend = true;
             supported_features->multiDrawIndirect = true;
          }
+         /* Spoof both vertex_attribute_divisor extensions as supported. Mali r51
+          * exposes KHR (we forward that); r44 exposes neither, so we advertise
+          * it purely to get vkd3d past its requirement check. Advertising BOTH
+          * (rather than hiding KHR) is fine -- the device-side filter below
+          * forwards whichever alias the base driver actually has, and
+          * process_pnext_chain aliases the feature struct EXT<->KHR to match. */
          WRAPPER_LOG(info, "Spoofing VK_EXT/KHR_vertex_attribute_divisor as supported");
          pdevice->emulate_vertex_divisor =
             !pdevice->base_supported_extensions.EXT_vertex_attribute_divisor &&
@@ -508,6 +532,12 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
          pdevice->vk.supported_extensions.EXT_extended_dynamic_state3 = false;
       }
 
+      /* Samsung Xclipse: vkd3d 3.x needs VK_EXT_dynamic_rendering_unused_attachments
+       * for correct rendering (draws with unused/mismatched render targets get
+       * dropped -> objects vanish, e.g. the player character), but Xclipse doesn't
+       * expose it. Advertise it -- it is a validation relaxation the RDNA driver
+       * tolerates; the feature is faked in Features2 and the struct is unlinked from
+       * the real CreateDevice pNext. */
       if (pdevice->driver_properties.driverID == VK_DRIVER_ID_SAMSUNG_PROPRIETARY) {
          bool samsung_d3d = strstr(engine_name, "DXVK") || strstr(engine_name, "vkd3d");
          pdevice->is_vkd3d = strstr(engine_name, "vkd3d") != NULL;
@@ -522,6 +552,11 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
           debug_get_bool_option("WRAPPER_GRAPHICS_QUEUE_FAMILY_ONLY", true))
          wrapper_hide_compute_queue_families(pdevice);
 
+      /* DXVK > 2.4.1 requires VK_KHR_maintenance5. Some drivers (e.g. Xclipse)
+       * don't expose it. Emulate it for any D3D client whose base driver lacks
+       * it (NOT Samsung-gated -- the base-lacks guard limits it to drivers that
+       * actually need it). Feature faked in Features2, struct unlinked from the
+       * real CreateDevice, entrypoints implemented in wrapper_device.c. */
       {
          bool is_d3d = strstr(engine_name, "DXVK") || strstr(engine_name, "vkd3d");
          if (is_d3d && !pdevice->base_supported_extensions.KHR_maintenance5) {
@@ -552,6 +587,11 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
          pdevice->lower_int64 = true;
       }
 
+      /* VK_KHR_push_descriptor: vkd3d/DXVK effectively require it, but some
+       * drivers (e.g. Mali r44) don't expose it. Advertise + emulate it for D3D
+       * clients whose base driver lacks it. maxPushDescriptors is reported in
+       * wrapper_GetPhysicalDeviceProperties2; the entrypoints are emulated in
+       * wrapper_device.c. */
       {
          bool is_d3d = strstr(engine_name, "DXVK") || strstr(engine_name, "vkd3d");
          if (is_d3d && !pdevice->base_supported_extensions.KHR_push_descriptor) {
@@ -603,12 +643,12 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
       }
 
       char *wrapper_resource_type = getenv("WRAPPER_RESOURCE_TYPE");
+
       pdevice->resource_type = wrapper_resource_type ? wrapper_resource_type : "auto";
 
       list_addtail(&pdevice->vk.link, &_instance->physical_devices.list);
    }
 
-   free(physical_devices);
    return VK_SUCCESS;
 }
 
@@ -668,32 +708,7 @@ VKAPI_ATTR void VKAPI_CALL
 wrapper_GetPhysicalDeviceFeatures(VkPhysicalDevice physicalDevice,
                                   VkPhysicalDeviceFeatures* pFeatures) 
 {
-   vk_common_GetPhysicalDeviceFeatures(physicalDevice, pFeatures);
-
-   /* Forzar características clave omitidas en hardware Mali */
-   pFeatures->logicOp = true;
-   pFeatures->textureCompressionBC = true;
-   pFeatures->fillModeNonSolid = true;
-   pFeatures->shaderClipDistance = true;
-   pFeatures->shaderCullDistance = true;
-   pFeatures->geometryShader = true;
-   pFeatures->tessellationShader = true;
-   pFeatures->shaderInt16 = true;
-   pFeatures->sampleRateShading = true;
-   pFeatures->imageCubeArray = true;
-   pFeatures->shaderSampledImageArrayDynamicIndexing = true;
-   pFeatures->drawIndirectFirstInstance = true;
-   pFeatures->shaderUniformBufferArrayDynamicIndexing = true;
-   pFeatures->shaderStorageBufferArrayDynamicIndexing = true;
-   pFeatures->multiDrawIndirect = true;
-   pFeatures->sparseBinding = true;
-   pFeatures->shaderResourceMinLod = true;
-   pFeatures->shaderTessellationAndGeometryPointSize = true;
-   pFeatures->textureCompressionASTC_LDR = true;
-   pFeatures->occlusionQueryPrecise = true; 
-   pFeatures->shaderStorageImageExtendedFormats = true;
-   pFeatures->shaderStorageImageWriteWithoutFormat = true;
-   pFeatures->independentBlend = true;
+   return vk_common_GetPhysicalDeviceFeatures(physicalDevice, pFeatures);
 }
 
 VKAPI_ATTR void VKAPI_CALL
@@ -739,36 +754,6 @@ wrapper_GetPhysicalDeviceFeatures2(VkPhysicalDevice physicalDevice,
             ((VkPhysicalDeviceMaintenance5Features *)s)->maintenance5 = VK_TRUE;
       }
    }
-
-   /* Forzar características a nivel features2 */
-   pFeatures->features.logicOp = true;
-   pFeatures->features.textureCompressionBC = true;
-   pFeatures->features.fillModeNonSolid = true;
-   pFeatures->features.shaderClipDistance = true;
-   pFeatures->features.shaderCullDistance = true;
-   pFeatures->features.geometryShader = true;
-   pFeatures->features.tessellationShader = true;
-   pFeatures->features.shaderInt16 = true;
-   pFeatures->features.sampleRateShading = true;
-   pFeatures->features.imageCubeArray = true;
-   pFeatures->features.shaderSampledImageArrayDynamicIndexing = true;
-   pFeatures->features.drawIndirectFirstInstance = true;
-   pFeatures->features.shaderUniformBufferArrayDynamicIndexing = true;
-   pFeatures->features.shaderStorageBufferArrayDynamicIndexing = true;
-   pFeatures->features.multiDrawIndirect = true;
-   pFeatures->features.sparseBinding = true;
-   pFeatures->features.shaderResourceMinLod = true;
-   pFeatures->features.shaderTessellationAndGeometryPointSize = true;
-   pFeatures->features.textureCompressionASTC_LDR = true;
-   pFeatures->features.occlusionQueryPrecise = true; 
-   pFeatures->features.shaderStorageImageExtendedFormats = true;
-   pFeatures->features.shaderStorageImageWriteWithoutFormat = true;
-   pFeatures->features.independentBlend = true;
-
-   pdevice->vk.supported_extensions.EXT_vertex_attribute_divisor = true;
-   pdevice->vk.supported_extensions.KHR_vertex_attribute_divisor = true;
-   pdevice->vk.supported_extensions.EXT_custom_border_color = true;
-   pdevice->vk.supported_extensions.KHR_push_descriptor = true;
 }
 
 VKAPI_ATTR void VKAPI_CALL
@@ -804,11 +789,21 @@ wrapper_GetPhysicalDeviceProperties(VkPhysicalDevice physicalDevice,
    if (pdevice->fold_sets)
       pProperties->limits.maxBoundDescriptorSets = 8;
 
+   /* See wrapper_GetPhysicalDeviceProperties2: bump push constant size to the
+    * DXVK-required minimum on Xclipse. */
    if (pdevice->raises_push_constant_limit)
       pProperties->limits.maxPushConstantsSize = 256;
 }
 
-#define WRAPPER_D3D_BINDLESS_LIMIT (1u << 20)
+/* vkd3d's bindless model needs large UpdateAfterBind descriptor limits (D3D12
+ * shader-visible heaps hold up to ~1M descriptors). Some drivers (e.g. Mali
+ * r44) report only ~500k, so vkd3d aborts at bindless_state_init with
+ * "Insufficient descriptor indexing support". Spoof the limits up to the D3D12
+ * heap size for D3D clients. NOTE: unlike a feature toggle this is a REAL
+ * hardware limit -- if the game actually binds more descriptors than the driver
+ * can back, it will fault later (VK_EXT_device_fault will report where) rather
+ * than being cleanly rejected here. Only bumps values that are below target. */
+#define WRAPPER_D3D_BINDLESS_LIMIT (1u << 20)   /* 1048576 */
 #define BUMP_UAB(p, t) do { \
    uint32_t _t = (t); \
    if ((p)->maxUpdateAfterBindDescriptorsInAllPools < _t)           (p)->maxUpdateAfterBindDescriptorsInAllPools = _t; \
@@ -880,6 +875,12 @@ wrapper_GetPhysicalDeviceProperties2(VkPhysicalDevice physicalDevice,
    if (pdevice->fold_sets)
       pProperties->properties.limits.maxBoundDescriptorSets = 8;
 
+   /* DXVK 2.6+ requires maxPushConstantsSize >= 256 (its unified "push data"
+    * model) and skips the adapter otherwise. Xclipse reports less; the RDNA
+    * hardware underneath handles 256 (desktop AMD reports it), Samsung's driver
+    * just reports conservatively -- bump it so DXVK proceeds. NOTE: unlike the
+    * extension fakes, this is a real driver limit; if the driver enforces it in
+    * vkCreatePipelineLayout this will surface as pipeline-creation failures. */
    if (pdevice->raises_push_constant_limit)
       pProperties->properties.limits.maxPushConstantsSize = 256;
 
@@ -895,6 +896,8 @@ wrapper_GetPhysicalDeviceProperties2(VkPhysicalDevice physicalDevice,
                UINT32_MAX;
             break;
          }
+         /* A driver with only the EXT extension already filled this struct;
+          * its KHR query would come back empty. */
          if (!pdevice->base_supported_extensions.KHR_vertex_attribute_divisor)
             break;
          VkPhysicalDeviceVertexAttributeDivisorPropertiesKHR khr_vad = {
@@ -936,6 +939,8 @@ wrapper_GetPhysicalDeviceProperties2(VkPhysicalDevice physicalDevice,
       }
       case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PUSH_DESCRIPTOR_PROPERTIES:
       {
+         /* Only override when we're faking the extension; if the base driver has
+          * it natively it already filled a real limit. */
          if (pdevice->vk.supported_extensions.KHR_push_descriptor &&
              !pdevice->base_supported_extensions.KHR_push_descriptor)
             ((VkPhysicalDevicePushDescriptorProperties *)prop)->maxPushDescriptors =
@@ -997,6 +1002,7 @@ wrapper_GetPhysicalDeviceProperties2(VkPhysicalDevice physicalDevice,
          strcpy(vk12_prop->driverInfo, driver_info);
          strcpy(vk12_prop->driverName, "Wrapper driver");
 
+         /* Vulkan12Properties folds in the descriptor-indexing limits. */
          if (is_d3d) {
             BUMP_UAB(vk12_prop, WRAPPER_D3D_BINDLESS_LIMIT);
             wrapper_keep_real_ubo_limits(pdevice,
@@ -1124,7 +1130,7 @@ wrapper_GetPhysicalDeviceImageFormatProperties(VkPhysicalDevice physicalDevice,
          pImageFormatProperties->maxArrayLayers = 1;
       else
          pImageFormatProperties->maxArrayLayers = pdevice->properties2.properties.limits.maxImageArrayLayers;
-
+      // We do not handle any case here for now
       pImageFormatProperties->sampleCounts = VK_SAMPLE_COUNT_1_BIT;      
       pImageFormatProperties->maxResourceSize = 562949953421312;
       wrapper_diag_bcn_answer(0, "ImageFormatProperties", format);
@@ -1191,7 +1197,8 @@ wrapper_GetPhysicalDeviceImageFormatProperties2(VkPhysicalDevice physicalDevice,
          pImageFormatProperties->imageFormatProperties.maxExtent.height = pdevice->properties2.properties.limits.maxImageDimension3D;
          pImageFormatProperties->imageFormatProperties.maxExtent.depth = pdevice->properties2.properties.limits.maxImageDimension3D;
       }
-
+      // We do not handle the case where vkPhysicalDeviceImageFormatInfo pNext has
+      // a handleType which does not require mipMaps
       if (pImageFormatInfo->tiling & VK_IMAGE_TILING_LINEAR ||
              pImageFormatInfo->tiling & VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT ||
              pImageFormatInfo->flags & VK_IMAGE_CREATE_SUBSAMPLED_BIT_EXT)
@@ -1206,7 +1213,7 @@ wrapper_GetPhysicalDeviceImageFormatProperties2(VkPhysicalDevice physicalDevice,
          pImageFormatProperties->imageFormatProperties.maxArrayLayers = 1;
       else
          pImageFormatProperties->imageFormatProperties.maxArrayLayers = pdevice->properties2.properties.limits.maxImageArrayLayers;
-
+      // We do not handle any case here for now
       pImageFormatProperties->imageFormatProperties.sampleCounts = VK_SAMPLE_COUNT_1_BIT;      
       pImageFormatProperties->imageFormatProperties.maxResourceSize = 562949953421312;
       wrapper_diag_bcn_answer(1, "ImageFormatProperties2", pImageFormatInfo->format);
@@ -1323,23 +1330,6 @@ wrapper_report_coherent_memory_types(struct wrapper_physical_device *pdevice,
       if (pdevice->coherent_memory_type[i] != i)
          props->memoryTypes[i].propertyFlags |= VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
    }
-}
-
-VKAPI_ATTR VkResult VKAPI_CALL
-wrapper_GetPhysicalDeviceSurfaceSupportKHR(VkPhysicalDevice physicalDevice,
-                                           uint32_t queueFamilyIndex,
-                                           VkSurfaceKHR surface,
-                                           VkBool32 *pSupported)
-{
-   VK_FROM_HANDLE(wrapper_physical_device, pdevice, physicalDevice);
-   
-   if (pdevice->dispatch_table.GetPhysicalDeviceSurfaceSupportKHR) {
-      pdevice->dispatch_table.GetPhysicalDeviceSurfaceSupportKHR(
-         pdevice->dispatch_handle, queueFamilyIndex, surface, pSupported);
-   }
-
-   *pSupported = VK_TRUE;
-   return VK_SUCCESS;
 }
 
 VKAPI_ATTR void VKAPI_CALL
