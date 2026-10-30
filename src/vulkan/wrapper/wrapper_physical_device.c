@@ -498,6 +498,7 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
             
             pdevice->vk.supported_extensions.EXT_depth_clip_enable = true;
             pdevice->vk.supported_extensions.EXT_custom_border_color = true;
+            supported_features->depthClipEnable = true;
             /* ------------------------------------------------------------- */
 
             if (is_dxvk && engine_version >= VK_MAKE_VERSION(2, 7, 0)) {
