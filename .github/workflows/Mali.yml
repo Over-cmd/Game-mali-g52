@@ -80,10 +80,13 @@ jobs:
         run: |
           WRAPPER_SO="build/src/vulkan/wrapper/libvulkan_wrapper.so"
           if [ -f "$WRAPPER_SO" ]; then
-            echo "-> [Host] ¡Éxito! Estructurando tu paquete original compatible de producción..."
+            echo "-> [Host] ¡Éxito! Estructurando tu paquete y recolectando todas las librerías..."
             rm -rf final_pkg
             mkdir -p final_pkg/usr/lib final_pkg/usr/share/vulkan/icd.d
             cp -fv "$WRAPPER_SO" final_pkg/usr/lib/libvulkan_wrapper.so
+            
+            # 🔍 RECOLECTAR TODAS LAS LIBRERÍAS .SO NECESARIAS DE LA CARPETA BUILD (Zink, Panfrost, etc.)
+            find build/ -name "*.so" -not -path "*/CMakeFiles/*" -not -path "*/test/*" -exec cp -fv {} final_pkg/usr/lib/ \; 2>/dev/null || true
             
             # TU REGLA DE COMODINES DE ADRENOTOOLS GANADORA INDESTRUCTIBLE
             cp -fv ./build/subprojects/libadrenotools/*.so ./build/subprojects/libadrenotools/src/hook/*.so final_pkg/usr/lib/ 2>/dev/null || true
@@ -98,7 +101,7 @@ jobs:
             
             sync && sleep 3
             cd final_pkg && tar -I 'zstd -19 -T0' -cf ../wrapper.tzst usr/ && cd ..
-            echo "-> ¡Paquete original puro forjado con éxito!"
+            echo "-> ¡Paquete completo forjado con todas las librerías y Zink incluido!"
           else
             echo "-> [❌ ERROR GRAVE] El binario libvulkan_wrapper.so no se encuentra en build/."
             exit 1
