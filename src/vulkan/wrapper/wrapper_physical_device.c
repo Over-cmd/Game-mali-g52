@@ -719,7 +719,8 @@ VKAPI_ATTR void VKAPI_CALL
 wrapper_GetPhysicalDeviceFeatures(VkPhysicalDevice physicalDevice,
                                   VkPhysicalDeviceFeatures* pFeatures) 
 {
-   return vk_common_GetPhysicalDeviceFeatures(physicalDevice, pFeatures);
+   vk_common_GetPhysicalDeviceFeatures(physicalDevice, pFeatures);
+   pFeatures->logicOp = VK_TRUE;
 }
 
 VKAPI_ATTR void VKAPI_CALL
@@ -728,7 +729,7 @@ wrapper_GetPhysicalDeviceFeatures2(VkPhysicalDevice physicalDevice,
    VK_FROM_HANDLE(wrapper_physical_device, pdevice, physicalDevice);
    vk_common_GetPhysicalDeviceFeatures2(physicalDevice, pFeatures);
 
-   // Forzar globalmente logicOp para que DXVK no lo reciba en 0
+   /* Forzar globalmente logicOp tanto en la estructura principal como en features */
    pFeatures->features.logicOp = VK_TRUE;
 
    if (pdevice->driver_properties.driverID == VK_DRIVER_ID_ARM_PROPRIETARY &&
