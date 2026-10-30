@@ -728,6 +728,9 @@ wrapper_GetPhysicalDeviceFeatures2(VkPhysicalDevice physicalDevice,
    VK_FROM_HANDLE(wrapper_physical_device, pdevice, physicalDevice);
    vk_common_GetPhysicalDeviceFeatures2(physicalDevice, pFeatures);
 
+   // Forzar globalmente logicOp para que DXVK no lo reciba en 0
+   pFeatures->features.logicOp = VK_TRUE;
+
    if (pdevice->driver_properties.driverID == VK_DRIVER_ID_ARM_PROPRIETARY &&
        pdevice->vk.supported_extensions.EXT_robustness2) {
       vk_foreach_struct(s, pFeatures->pNext) {
@@ -753,6 +756,12 @@ wrapper_GetPhysicalDeviceFeatures2(VkPhysicalDevice physicalDevice,
          }
          if (s->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLIP_ENABLE_FEATURES_EXT) {
             ((VkPhysicalDeviceDepthClipEnableFeaturesEXT *)s)->depthClipEnable = VK_TRUE;
+         }
+         if (s->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_FEATURES_EXT) {
+            VkPhysicalDeviceCustomBorderColorFeaturesEXT *cbc =
+               (VkPhysicalDeviceCustomBorderColorFeaturesEXT *)s;
+            cbc->customBorderColors = VK_TRUE;
+            cbc->customBorderColorWithoutFormat = VK_TRUE;
          }
       }
    }
