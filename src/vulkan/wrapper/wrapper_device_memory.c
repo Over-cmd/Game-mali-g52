@@ -76,6 +76,7 @@ dma_heap_alloc(int heap_fd, size_t size) {
    return alloc_data.fd;
 }
 
+// https://cs.android.com/android/kernel/superproject/+/common-android-4.9:common/drivers/staging/android/uapi/ion.h
 struct ion_allocation_data_1 {
 	size_t len;
 	size_t align;
@@ -99,6 +100,7 @@ struct ion_handle_data_1 {
 #define ION_IOC_MAP_1         _IOWR(ION_IOC_MAGIC, 2, struct ion_fd_data_1)
 #define ION_IOC_SHARE_1		   _IOWR(ION_IOC_MAGIC, 4, struct ion_fd_data_1)
 
+// https://cs.android.com/android/kernel/superproject/+/common-android-4.14:common/drivers/staging/android/uapi/ion.h
 struct ion_allocation_data_2 {
    __u64 len;
    __u32 heap_id_mask;
@@ -108,9 +110,9 @@ struct ion_allocation_data_2 {
 };
 
 struct ion_heap_query_2 {
-	__u32 cnt;
-	__u32 reserved0;
-	__u64 heaps;
+	__u32 cnt; /* Total number of heaps to be copied */
+	__u32 reserved0; /* align to 64bits */
+	__u64 heaps; /* buffer to be populated */
 	__u32 reserved1;
 	__u32 reserved2;
 };
@@ -137,6 +139,7 @@ static int
 ion_heap_alloc_2(int heap_fd, size_t size) {
    struct ion_allocation_data_2 alloc_data = {
       .len = size,
+      /* ION_HEAP_SYSTEM | ION_SYSTEM_HEAP_ID (Qcom) */
       .heap_id_mask = (1U << 0) | (1U << 25),
       .flags = wrapper_ion_flags(size),
    };
@@ -155,6 +158,7 @@ static int
 ion_heap_alloc(int heap_fd, size_t size) {
    static int ion_iface = 0;
    if (!ion_iface) {
+      // See https://github.com/mirror/mesa/blob/e24dc5bd1e7fe6101bdc866fb16a15a8fcae1aae/src/freedreno/vulkan/tu_knl_kgsl.cc#L1789
       struct ion_handle_data_1 probe = { .handle = 0 };
       if (safe_ioctl(heap_fd, ION_IOC_FREE_1, &probe) >= 0 || errno != ENOTTY) {
          ion_iface = 1;
@@ -168,10 +172,12 @@ ion_heap_alloc(int heap_fd, size_t size) {
       return ion_heap_alloc_2(heap_fd, size);
    }
 
+   // see https://github.com/mirror/mesa/blob/e24dc5bd1e7fe6101bdc866fb16a15a8fcae1aae/src/freedreno/vulkan/tu_knl_kgsl.cc#L122
+   // bo_init_new_ion_legacy
    struct ion_allocation_data_1 alloc_data = {
       .len = size,
       .align = 0,
-      .heap_id_mask = (1U << 0) | (1U << 25),
+      .heap_id_mask = (1U << 0) | (1U << 25) /* QCom specific */,
       .flags = wrapper_ion_flags(size),
    };
 
@@ -263,7 +269,7 @@ unlink_memory_alloc_info_pnext(VkMemoryAllocateInfo *alloc_info, VkStructureType
    vk_foreach_struct(s, (void *)alloc_info->pNext) {
       if (s->sType == sType) {
          if (prev) {
-            prev->pNext = s->pNext;
+            prev->pNext = s->pNext; // modifies application owned memory, but it should be okay
          }
          return;
       }
@@ -282,6 +288,7 @@ static VkResult check_dedicated_allocate_info_for(struct wrapper_device *device,
       struct wrapper_image *img = get_wrapper_image_from_handle_locked(
          device, memory_dedicated_info->image);
       if (img && img->handle_types && !(img->handle_types & handle_types)) {
+         // Shouldn't happen anymore
          WRAPPER_LOG(error, "Dedicated image handle type mismatch (0x%x vs required 0x%x)",
                      img ? img->handle_types : 0, handle_types);
          return VK_ERROR_INVALID_EXTERNAL_HANDLE;
@@ -292,6 +299,7 @@ static VkResult check_dedicated_allocate_info_for(struct wrapper_device *device,
       struct wrapper_buffer *buf = get_wrapper_buffer_from_handle_locked(
          device, memory_dedicated_info->buffer);
       if (buf && buf->handle_types && !(buf->handle_types & handle_types)) {
+         // Shouldn't happen anymore
          WRAPPER_LOG(error, "Dedicated buffer handle type mismatch (0x%x vs required 0x%x)",
                      buf ? buf->handle_types : 0, handle_types);
          return VK_ERROR_INVALID_EXTERNAL_HANDLE;
@@ -554,26 +562,6 @@ wrapper_device_memory_from_handle(struct wrapper_device *device,
    return mem;
 }
 
-/* Sincroniza la caché de CPU de las reservas cacheadas. */
-static void
-wrapper_sync_cached_memory(struct wrapper_device *device)
-{
-   static int on = -1;
-   if (on < 0)
-      on = getenv("WRAPPER_SYNC") ? atoi(getenv("WRAPPER_SYNC")) : 0;
-   if (!on)
-      return;
-
-   struct dma_buf_sync sync = { .flags = DMA_BUF_SYNC_END | DMA_BUF_SYNC_WRITE };
-   simple_mtx_lock(&device->resource_mutex);
-   list_for_each_entry(struct wrapper_device_memory, m,
-                       &device->device_memory_list, link) {
-      if (m->map_address && m->fd >= 0)
-         ioctl(m->fd, DMA_BUF_IOCTL_SYNC, &sync);
-   }
-   simple_mtx_unlock(&device->resource_mutex);
-}
-
 /* ---- Memoria no coherente: volcado/invalidación de caché por rangos ---------- */
 #if defined(__aarch64__)
 static void
@@ -717,7 +705,7 @@ wrapper_AllocateMemory(VkDevice _device,
    static int bypass_swapchains = -1;
    if (bypass_swapchains == -1) 
       bypass_swapchains = getenv("WRAPPER_BYPASS_SWAPCHAIN_PLACED") ?
-                          atoi(getenv("WRAPPER_BYPASS_SWAPCHAIN_PLACED")) : 0;
+                          atoi(getenv("WRAPPER_BYPASS_SWAPCHAIN_PLACED")) : 0; // TODO: turn on by default if safe
 
    if (bypass_swapchains && dedicated_allocate_info && dedicated_allocate_info->image != VK_NULL_HANDLE) {
       struct wrapper_image *img = get_wrapper_image_from_handle(device, dedicated_allocate_info->image);
@@ -745,6 +733,7 @@ wrapper_AllocateMemory(VkDevice _device,
 
    VkExternalMemoryHandleTypeFlags valid_handle_types = 0;
    if (dedicated_allocate_info) {
+      // Note that buffer/image are mutually exclusive
       if (dedicated_allocate_info->image != VK_NULL_HANDLE) {
          struct wrapper_image *img = get_wrapper_image_from_handle_locked(device, dedicated_allocate_info->image);
          if (img) {
@@ -761,6 +750,8 @@ wrapper_AllocateMemory(VkDevice _device,
 
    VkMemoryAllocateInfo memory_allocate_info = *pAllocateInfo;
    if (dedicated_allocate_info && valid_handle_types == 0) {
+      // Driver "bug" on some mobile drivers - providing an empty dedicate memory hint in conjunction with the
+      // VkImportMemoryFdInfoKHR / VkExportMemoryAllocateInfo could crash the driver
       unlink_memory_alloc_info_pnext(&memory_allocate_info, VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO);
    }
    
@@ -807,12 +798,17 @@ wrapper_AllocateMemory(VkDevice _device,
       wrapper_device_memory_destroy(mem);
 
       if (dedicated_allocate_info && dedicated_allocate_info->image != VK_NULL_HANDLE) {
+         /* resource_mutex is already held here and simple_mtx is not
+          * recursive, so search the image table directly instead of
+          * going through get_wrapper_image_from_handle. */
          struct wrapper_image *img = get_wrapper_image_from_handle_locked(
             device, dedicated_allocate_info->image);
          if (img && img->is_wsi_image) {
+            // Fixes failure to blit on ion-heap (< GKI 5.10) Mali devices at the cost of
+            // not being able to mmap these.
             WRAPPER_LOG(error, "EXT_map_memory_placed emulation failed for swapchain image, bypassing emulation");
             simple_mtx_unlock(&device->resource_mutex);
-            goto fallback;
+            goto fallback; // TODO: the VkMemoryAllocateInfo may have been unlinked here
          }
       }
 
@@ -909,6 +905,9 @@ wrapper_MapMemory2KHR(VkDevice _device,
       int idx;
 
       handle = AHardwareBuffer_getNativeHandle(mem->ahardware_buffer);
+      /* The AHB native handle may carry several fds (e.g. metadata pipes
+       * alongside the actual memory fd); pick the first one that is
+       * seekable and large enough to back the allocation. */
       for (idx = 0; idx < handle->numFds; idx++) {
          off_t size = lseek(handle->data[idx], 0, SEEK_END);
          if (size < 0) {
