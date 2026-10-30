@@ -47,22 +47,22 @@ jobs:
 
           LIBSYNC_H="src/util/libsync.h"
           if [ -f "$LIBSYNC_H" ]; then
-            echo -e "#ifndef MESA_LIBSYNC_H_WRAPPER\n#define MESA_LIBSYNC_H_WRAPPER\n#include <sync/sync.h>\nint sync_accumulate(const char *name, int *fd1, int fd2);\nvoid validate_fence_fd(int fd);\nint sync_valid_fd(int fd);\nint sync_wait(int fd, int timeout);\nint sync_merge(const char *name, int fd1, int fd2);\n#endif" > "$LIBSYNC_H"
+            printf "#ifndef MESA_LIBSYNC_H_WRAPPER\n#define MESA_LIBSYNC_H_WRAPPER\n#include <sync/sync.h>\nint sync_accumulate(const char *name, int *fd1, int fd2);\nvoid validate_fence_fd(int fd);\nint sync_valid_fd(int fd);\nint sync_wait(int fd, int timeout);\nint sync_merge(const char *name, int fd1, int fd2);\n#endif\n" > "$LIBSYNC_H"
           fi
 
           DRI_TARGET_C="src/gallium/targets/dri/dri_target.c"
           if [ -f "$DRI_TARGET_C" ]; then
-            echo -e "\n/* Prototipos */\nint sync_wait(int fd, int timeout);\nint sync_accumulate(const char *name, int *fd1, int fd2);\nvoid validate_fence_fd(int fd);\n/* Cuerpos */\nint sync_wait(int fd, int timeout) { return 0; }\nint sync_accumulate(const char *name, int *fd1, int fd2) { return 0; }\nvoid validate_fence_fd(int fd) { return; }" >> "$DRI_TARGET_C"
+            printf "\n/* Prototipos */\nint sync_wait(int fd, int timeout);\nint sync_accumulate(const char *name, int *fd1, int fd2);\nvoid validate_fence_fd(int fd);\n/* Cuerpos */\nint sync_wait(int fd, int timeout) { return 0; }\nint sync_accumulate(const char *name, int *fd1, int fd2) { return 0; }\nvoid validate_fence_fd(int fd) { return; }\n" >> "$DRI_TARGET_C"
           fi
 
           PANVK_INSTANCE_C="src/panfrost/vulkan/panvk_instance.c"
           if [ -f "$PANVK_INSTANCE_C" ]; then
-            echo -e "\n/* Prototipos */\nint sync_wait(int fd, int timeout);\nint sync_merge(const char *name, int fd1, int fd2);\n/* Cuerpos */\nint sync_wait(int fd, int timeout) { return 0; }\nint sync_merge(const char *name, int fd1, int fd2) { return 0; }" >> "$PANVK_INSTANCE_C"
+            printf "\n/* Prototipos */\nint sync_wait(int fd, int timeout);\nint sync_merge(const char *name, int fd1, int fd2);\n/* Cuerpos */\nint sync_wait(int fd, int timeout) { return 0; }\nint sync_merge(const char *name, int fd1, int fd2) { return 0; }\n" >> "$PANVK_INSTANCE_C"
           fi
 
           EGL_API_C="src/egl/main/eglapi.c"
           if [ -f "$EGL_API_C" ]; then
-            echo -e "\nint sync_valid_fd(int fd);\nint sync_valid_fd(int fd) { return fd >= 0; }" >> "$EGL_API_C"
+            printf "\nint sync_valid_fd(int fd);\nint sync_valid_fd(int fd) { return fd >= 0; }\n" >> "$EGL_API_C"
           fi
 
       - name: ⚙️ 4. Configurar Docker Buildx
@@ -80,28 +80,25 @@ jobs:
         run: |
           WRAPPER_SO="build/src/vulkan/wrapper/libvulkan_wrapper.so"
           if [ -f "$WRAPPER_SO" ]; then
-            echo "-> [Host] ¡Éxito! Estructurando tu paquete y recolectando todas las librerías..."
+            echo "-> [Host] ¡Éxito! Estructurando tu paquete original compatible de producción..."
             rm -rf final_pkg
             mkdir -p final_pkg/usr/lib final_pkg/usr/share/vulkan/icd.d
             cp -fv "$WRAPPER_SO" final_pkg/usr/lib/libvulkan_wrapper.so
             
-            # 🔍 RECOLECTAR TODAS LAS LIBRERÍAS .SO NECESARIAS DE LA CARPETA BUILD (Zink, Panfrost, etc.)
-            find build/ -name "*.so" -not -path "*/CMakeFiles/*" -not -path "*/test/*" -exec cp -fv {} final_pkg/usr/lib/ \; 2>/dev/null || true
-            
-            # TU REGLA DE COMODINES DE ADRENOTOOLS GANADORA INDESTRUCTIBLE
+            # Copiar dependencias de libadrenotools de forma segura
             cp -fv ./build/subprojects/libadrenotools/*.so ./build/subprojects/libadrenotools/src/hook/*.so final_pkg/usr/lib/ 2>/dev/null || true
             
             chmod -R 755 final_pkg/usr/lib/
             patchelf --set-soname libvulkan_wrapper.so final_pkg/usr/lib/libvulkan_wrapper.so || true
             find final_pkg/usr/lib/ -name "*.so" -exec patchelf --set-rpath '$ORIGIN' {} \; 2>/dev/null || true
             
-            # TU MANIFIESTO ORIGINAL RELATIVO PLANO COMPATIBLE CON LA LISTA BLANCA
+            # Manifiesto JSON para ICD
             echo '{"ICD": {"api_version": "1.3.289", "library_path": "libvulkan_wrapper.so"}, "file_format_version": "1.0.0"}' > final_pkg/usr/share/vulkan/icd.d/wrapper_icd.aarch64.json
             echo '{"ICD": {"api_version": "1.3.289", "library_path": "libvulkan_wrapper.so"}, "file_format_version": "1.0.0"}' > final_pkg/usr/share/vulkan/icd.d/wrapper_icd.arm.json
             
             sync && sleep 3
-            cd final_pkg && tar -I 'zstd -19 -T0' -cf ../wrapper.tzst usr/ && cd ..
-            echo "-> ¡Paquete completo forjado con todas las librerías y Zink incluido!"
+            cd final_pkg && tar --zstd -cf ../wrapper.tzst usr/ && cd ..
+            echo "-> ¡Paquete original puro forjado con éxito!"
           else
             echo "-> [❌ ERROR GRAVE] El binario libvulkan_wrapper.so no se encuentra en build/."
             exit 1
