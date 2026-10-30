@@ -511,7 +511,7 @@ wrapper_device_memory_reset(struct wrapper_device_memory *mem) {
       munmap(mem->map_address, mem->map_size);
       mem->map_address = NULL;
    }
-   if (mem->dispatch_handle != VK_NULL_HANDLE && device && device->dispatch_table.FreeMemory) {
+   if (mem->dispatch_handle != VK_NULL_HANDLE) {
       device->dispatch_table.FreeMemory(device->dispatch_handle,
          mem->dispatch_handle, mem->alloc);
       mem->dispatch_handle = VK_NULL_HANDLE;
@@ -532,19 +532,14 @@ wrapper_device_memory_create(struct wrapper_device *device,
    (*out_mem)->fd = -1;
    (*out_mem)->device = device;
    (*out_mem)->alloc = alloc ? alloc : &device->vk.alloc;
-   
-   simple_mtx_lock(&device->resource_mutex);
    list_add(&(*out_mem)->link, &device->device_memory_list);
-   simple_mtx_unlock(&device->resource_mutex);
-
    return VK_SUCCESS;
 }
 
 void
 wrapper_device_memory_destroy(struct wrapper_device_memory *mem) {
-   if (!mem)
-      return;
    wrapper_device_memory_reset(mem);
+   list_del(&mem->link);
    vk_free2(&mem->device->vk.alloc, mem->alloc, mem);
 }
 
@@ -710,7 +705,7 @@ wrapper_AllocateMemory(VkDevice _device,
    static int bypass_swapchains = -1;
    if (bypass_swapchains == -1) 
       bypass_swapchains = getenv("WRAPPER_BYPASS_SWAPCHAIN_PLACED") ?
-                          atoi(getenv("WRAPPER_BYPASS_SWAPCHAIN_PLACED")) : 0;
+                          atoi(getenv("WRAPPER_BYPASS_SWAPCHAIN_PLACED")) : 0; // TODO: turn on by default if safe
 
    if (bypass_swapchains && dedicated_allocate_info && dedicated_allocate_info->image != VK_NULL_HANDLE) {
       struct wrapper_image *img = get_wrapper_image_from_handle(device, dedicated_allocate_info->image);
@@ -727,16 +722,18 @@ wrapper_AllocateMemory(VkDevice _device,
                pAllocateInfo->memoryTypeIndex, (unsigned) property_flags,
                device->physical->resource_type);
 
+   simple_mtx_lock(&device->resource_mutex);
+
    result = wrapper_device_memory_create(device, pAllocator, &mem);
    if (result != VK_SUCCESS) {
       vk_error(device, result);
-      return result;
+      goto out;
    }
    mem->alloc_size = pAllocateInfo->allocationSize;
 
    VkExternalMemoryHandleTypeFlags valid_handle_types = 0;
    if (dedicated_allocate_info) {
-      simple_mtx_lock(&device->resource_mutex);
+      // Note that buffer/image are mutually exclusive
       if (dedicated_allocate_info->image != VK_NULL_HANDLE) {
          struct wrapper_image *img = get_wrapper_image_from_handle_locked(device, dedicated_allocate_info->image);
          if (img) {
@@ -749,11 +746,12 @@ wrapper_AllocateMemory(VkDevice _device,
             valid_handle_types |= buf->handle_types;
          }
       }
-      simple_mtx_unlock(&device->resource_mutex);
    }
 
    VkMemoryAllocateInfo memory_allocate_info = *pAllocateInfo;
    if (dedicated_allocate_info && valid_handle_types == 0) {
+      // Driver "bug" on some mobile drivers - providing an empty dedicate memory hint in conjunction with the
+      // VkImportMemoryFdInfoKHR / VkExportMemoryAllocateInfo could crash the driver
       unlink_memory_alloc_info_pnext(&memory_allocate_info, VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO);
    }
    
@@ -797,33 +795,32 @@ wrapper_AllocateMemory(VkDevice _device,
    
    if (result != VK_SUCCESS) {
       WRAPPER_LOG(error, "Failed to allocate memory, res %d", result);
-      
-      simple_mtx_lock(&device->resource_mutex);
-      list_del(&mem->link);
-      simple_mtx_unlock(&device->resource_mutex);
-
       wrapper_device_memory_destroy(mem);
 
       if (dedicated_allocate_info && dedicated_allocate_info->image != VK_NULL_HANDLE) {
-         simple_mtx_lock(&device->resource_mutex);
+         /* resource_mutex is already held here and simple_mtx is not
+          * recursive, so search the image table directly instead of
+          * going through get_wrapper_image_from_handle. */
          struct wrapper_image *img = get_wrapper_image_from_handle_locked(
             device, dedicated_allocate_info->image);
-         bool is_wsi = img && img->is_wsi_image;
-         simple_mtx_unlock(&device->resource_mutex);
-
-         if (is_wsi) {
+         if (img && img->is_wsi_image) {
+            // Fixes failure to blit on ion-heap (< GKI 5.10) Mali devices at the cost of
+            // not being able to mmap these.
             WRAPPER_LOG(error, "EXT_map_memory_placed emulation failed for swapchain image, bypassing emulation");
-            goto fallback;
+            simple_mtx_unlock(&device->resource_mutex);
+            goto fallback; // TODO: the VkMemoryAllocateInfo may have been unlinked here
          }
       }
 
       vk_error(device, result);
-      return result;
    } else {
       *pMemory = mem->dispatch_handle;
       wrapper_dbg("fd=%d size=%llu", mem->fd, (unsigned long long) pAllocateInfo->allocationSize);
-      return VK_SUCCESS;
    }
+
+out:
+   simple_mtx_unlock(&device->resource_mutex);
+   return result;
 
 fallback:
    result = device->dispatch_table.AllocateMemory(device->dispatch_handle,
@@ -849,29 +846,18 @@ VKAPI_ATTR void VKAPI_CALL
 wrapper_FreeMemory(VkDevice _device, VkDeviceMemory _memory,
                    const VkAllocationCallbacks* pAllocator)
 {
-   if (_memory == VK_NULL_HANDLE)
-      return;
-
    VK_FROM_HANDLE(wrapper_device, device, _device);
-   if (!device || !device->dispatch_table.FreeMemory)
-      return;
-
    struct wrapper_device_memory *mem;
 
-   simple_mtx_lock(&device->resource_mutex);
    mem = wrapper_device_memory_from_handle(device, _memory);
    if (mem) {
-      list_del(&mem->link);
-      simple_mtx_unlock(&device->resource_mutex);
-
       mem->alloc = pAllocator;
-      wrapper_device_memory_destroy(mem);
-      return;
+      return wrapper_device_memory_destroy(mem);
    }
 
+   simple_mtx_lock(&device->resource_mutex);
    _mesa_hash_table_u64_remove(device->device_only_memory, (uint64_t)_memory);
    simple_mtx_unlock(&device->resource_mutex);
-
    device->dispatch_table.FreeMemory(device->dispatch_handle,
                                      _memory,
                                      pAllocator);
@@ -919,6 +905,9 @@ wrapper_MapMemory2KHR(VkDevice _device,
       int idx;
 
       handle = AHardwareBuffer_getNativeHandle(mem->ahardware_buffer);
+      /* The AHB native handle may carry several fds (e.g. metadata pipes
+       * alongside the actual memory fd); pick the first one that is
+       * seekable and large enough to back the allocation. */
       for (idx = 0; idx < handle->numFds; idx++) {
          off_t size = lseek(handle->data[idx], 0, SEEK_END);
          if (size < 0) {
