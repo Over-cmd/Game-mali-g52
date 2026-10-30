@@ -958,16 +958,26 @@ wrapper_MapMemory2KHR(VkDevice _device,
 
    WRAPPER_LOG(info, "Mapping memory %p, address %p size %zu\n", pMemoryMapInfo->memory, placed_info->pPlacedAddress, mem->map_size);
 
+   // Intentar mmap con MAP_FIXED de forma segura; si falla, usar asignación flotante estándar
    mem->map_address = mmap(placed_info->pPlacedAddress,
       mem->map_size, PROT_READ | PROT_WRITE,
          MAP_SHARED | MAP_FIXED, fd, 0);
 
    if (mem->map_address == MAP_FAILED) {
-      WRAPPER_LOG(error, "mmap failed: error %d", errno);
-      mem->map_address = NULL;
-      mem->map_size = 0;
-      result = VK_ERROR_MEMORY_MAP_FAILED;
-      goto fail;
+      WRAPPER_LOG(warn, "mmap with MAP_FAILED/MAP_FIXED at %p failed (errno %d), attempting dynamic fallback mapping", placed_info->pPlacedAddress, errno);
+      
+      // Fallback: omitir MAP_FIXED para permitir que el SO asigne una dirección segura
+      mem->map_address = mmap(NULL,
+         mem->map_size, PROT_READ | PROT_WRITE,
+            MAP_SHARED, fd, 0);
+            
+      if (mem->map_address == MAP_FAILED) {
+         WRAPPER_LOG(error, "Dynamic fallback mmap also failed: error %d", errno);
+         mem->map_address = NULL;
+         mem->map_size = 0;
+         result = VK_ERROR_MEMORY_MAP_FAILED;
+         goto fail;
+      }
    }
 
    if (mem->ahardware_buffer) {
