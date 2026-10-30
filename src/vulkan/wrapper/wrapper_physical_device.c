@@ -816,29 +816,29 @@ wrapper_GetPhysicalDeviceFeatures2(VkPhysicalDevice physicalDevice,
 
    /* FORZAR AL FINAL DE TODO PARA EVITAR QUE SE SOBREESCRIBA */
    pFeatures->features.logicOp = true;
-   pFeatures->textureCompressionBC = true;
-   pFeatures->fillModeNonSolid = true;
-   pFeatures->shaderClipDistance = true;
-   pFeatures->shaderCullDistance = true;
-   pFeatures->geometryShader = true;
-   pFeatures->tessellationShader = true;
-   pFeatures->shaderInt16 = true;
-   pFeatures->sampleRateShading = true;
-   pFeatures->imageCubeArray = true;
-   pFeatures->shaderSampledImageArrayDynamicIndexing = true;
-   pFeatures->drawIndirectFirstInstance = true;
-   pFeatures->shaderUniformBufferArrayDynamicIndexing = true;
-   pFeatures->shaderStorageBufferArrayDynamicIndexing = true;
-   pFeatures->multiDrawIndirect = true;
-   pFeatures->sparseBinding = true;
-   pFeatures->shaderResourceMinLod = true;
-   pFeatures->shaderTessellationAndGeometryPointSize = true;
-   pFeatures->textureCompressionASTC_LDR = true;
-   pFeatures->occlusionQueryPrecise = true; 
-   pFeatures->shaderStorageImageExtendedFormats = true;
-   pFeatures->shaderStorageImageWriteWithoutFormat = true;
-   pFeatures->independentBlend = true;
-   pFeatures->variableMultisampleRate = false;
+   pFeatures->features.textureCompressionBC = true;
+   pFeatures->features.fillModeNonSolid = true;
+   pFeatures->features.shaderClipDistance = true;
+   pFeatures->features.shaderCullDistance = true;
+   pFeatures->features.geometryShader = true;
+   pFeatures->features.tessellationShader = true;
+   pFeatures->features.shaderInt16 = true;
+   pFeatures->features.sampleRateShading = true;
+   pFeatures->features.imageCubeArray = true;
+   pFeatures->features.shaderSampledImageArrayDynamicIndexing = true;
+   pFeatures->features.drawIndirectFirstInstance = true;
+   pFeatures->features.shaderUniformBufferArrayDynamicIndexing = true;
+   pFeatures->features.shaderStorageBufferArrayDynamicIndexing = true;
+   pFeatures->features.multiDrawIndirect = true;
+   pFeatures->features.sparseBinding = true;
+   pFeatures->features.shaderResourceMinLod = true;
+   pFeatures->features.shaderTessellationAndGeometryPointSize = true;
+   pFeatures->features.textureCompressionASTC_LDR = true;
+   pFeatures->features.occlusionQueryPrecise = true; 
+   pFeatures->features.shaderStorageImageExtendedFormats = true;
+   pFeatures->features.shaderStorageImageWriteWithoutFormat = true;
+   pFeatures->features.independentBlend = true;
+   pFeatures->features.variableMultisampleRate = false;
 }
 
 VKAPI_ATTR void VKAPI_CALL
