@@ -768,7 +768,6 @@ wrapper_GetPhysicalDeviceFeatures(VkPhysicalDevice physicalDevice,
    pFeatures->shaderStorageImageWriteWithoutFormat = true;
    pFeatures->independentBlend = true;
    pFeatures->variableMultisampleRate = false;
-   pFeatures->depthClipEnable = true;
    pFeatures->shaderStorageImageMultisample = true;
 }
 
@@ -850,7 +849,6 @@ wrapper_GetPhysicalDeviceFeatures2(VkPhysicalDevice physicalDevice,
    pFeatures->features.shaderStorageImageWriteWithoutFormat = true;
    pFeatures->features.independentBlend = true;
    pFeatures->features.variableMultisampleRate = false;
-   pFeatures->features.depthClipEnable = true;
    pFeatures->features.shaderStorageImageMultisample = true;
 }
 
