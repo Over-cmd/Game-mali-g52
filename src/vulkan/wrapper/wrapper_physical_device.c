@@ -489,6 +489,17 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
             pdevice->vk.supported_extensions.EXT_robustness2 = true;
             supported_features->robustBufferAccess2 = true;
             supported_features->nullDescriptor = true;
+            
+            /* --- FORZAR CARACTERÍSTICAS FALTANTES EN MALI PARA ZINK/DXVK --- */
+            supported_features->logicOp = true;
+            supported_features->fillModeNonSolid = true;
+            supported_features->shaderClipDistance = true;
+            supported_features->shaderCullDistance = true;
+            
+            pdevice->vk.supported_extensions.EXT_depth_clip_enable = true;
+            pdevice->vk.supported_extensions.EXT_custom_border_color = true;
+            /* ------------------------------------------------------------- */
+
             if (is_dxvk && engine_version >= VK_MAKE_VERSION(2, 7, 0)) {
                WRAPPER_LOG(info, "Faking VK_KHR_pipeline_library");
                pdevice->vk.supported_extensions.KHR_pipeline_library = true;
@@ -739,6 +750,9 @@ wrapper_GetPhysicalDeviceFeatures2(VkPhysicalDevice physicalDevice,
                (VkPhysicalDeviceVertexAttributeDivisorFeaturesEXT *)s;
             vad->vertexAttributeInstanceRateDivisor = VK_TRUE;
             vad->vertexAttributeInstanceRateZeroDivisor = VK_TRUE;
+         }
+         if (s->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLIP_ENABLE_FEATURES_EXT) {
+            ((VkPhysicalDeviceDepthClipEnableFeaturesEXT *)s)->depthClipEnable = VK_TRUE;
          }
       }
    }
