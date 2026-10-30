@@ -258,6 +258,7 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
    static int wrapper_disable_placed = -1;
    static int wrapper_dmaheap_cached = -1;
    static int wrapper_disable_present_wait = -1;
+   static int wrapper_force_swapchain_blit = -1;
    int wrapper_emulate_bcn;
    VkResult result;
 
@@ -276,6 +277,7 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
       
    if (result!= VK_SUCCESS) {
       WRAPPER_LOG(error, "Failed to enumerate physical devices, res %d", result);	
+      free(physical_devices);
       return result;
    }
    
@@ -285,8 +287,10 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
 
       pdevice = vk_zalloc(&_instance->alloc, sizeof(*pdevice), 8,
                           VK_SYSTEM_ALLOCATION_SCOPE_INSTANCE);
-      if (!pdevice)
+      if (!pdevice) {
+         free(physical_devices);
          return VK_ERROR_OUT_OF_HOST_MEMORY;
+      }
 
       struct vk_physical_device_dispatch_table dispatch_table;
       vk_physical_device_dispatch_table_from_entrypoints(
@@ -302,6 +306,7 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
                                        &dispatch_table);
       if (result != VK_SUCCESS) {
          vk_free(&_instance->alloc, pdevice);
+         free(physical_devices);
          return result;
       }
 
@@ -318,6 +323,9 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
 
       if (wrapper_disable_present_wait == -1)
          wrapper_disable_present_wait = getenv("WRAPPER_DISABLE_PRESENT_WAIT") && atoi(getenv("WRAPPER_DISABLE_PRESENT_WAIT"));
+
+      if (wrapper_force_swapchain_blit == -1)
+         wrapper_force_swapchain_blit = getenv("WRAPPER_FORCE_SWAPCHAIN_BLIT") ? atoi(getenv("WRAPPER_FORCE_SWAPCHAIN_BLIT")) : 1;
 
       wrapper_setup_device_extensions(pdevice);
       wrapper_apply_device_extension_blacklist(pdevice);
@@ -375,6 +383,7 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
       if (result != VK_SUCCESS) {
          vk_physical_device_finish(&pdevice->vk);
          vk_free(&_instance->alloc, pdevice);
+         free(physical_devices);
          return result;
       }
       pdevice->vk.wsi_device = &pdevice->wsi_device;
@@ -389,6 +398,15 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
       };
       pdevice->dispatch_table.GetPhysicalDeviceProperties2(
          pdevice->dispatch_handle, &pdevice->properties2);
+
+      pdevice->dispatch_table.GetPhysicalDeviceMemoryProperties(
+         pdevice->dispatch_handle, &pdevice->memory_properties);
+
+     WRAPPER_LOG(info, "GPU Name: %s", pdevice->properties2.properties.deviceName);
+     WRAPPER_LOG(info, "Driver Version: %u.%u.%u",
+                 VK_API_VERSION_MAJOR(pdevice->properties2.properties.driverVersion),
+                 VK_API_VERSION_MINOR(pdevice->properties2.properties.driverVersion),
+                 VK_API_VERSION_PATCH(pdevice->properties2.properties.driverVersion));
 
       /* Only DXVK needs the raised limit; vkd3d-proton works within the real
        * one. The raised limit is not real storage: DXVK's independent GPL
@@ -421,12 +439,7 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
          WRAPPER_LOG(info, "Reporting 8 descriptor sets (driver has %u); bindless sets are folded",
                      pdevice->properties2.properties.limits.maxBoundDescriptorSets);
 
-      pdevice->dispatch_table.GetPhysicalDeviceMemoryProperties(
-         pdevice->dispatch_handle, &pdevice->memory_properties);
       wrapper_setup_coherent_memory_types(pdevice);
-
-     WRAPPER_LOG(info, "GPU Name: %s", pdevice->properties2.properties.deviceName);
-     WRAPPER_LOG(info, "Driver Version: %s", get_driver_version(pdevice->properties2.properties.driverVersion));
 
       const char *app_name = instance->vk.app_info.app_name
          ? instance->vk.app_info.app_name : "wrapper";
@@ -489,6 +502,10 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
             pdevice->vk.supported_extensions.EXT_robustness2 = true;
             supported_features->robustBufferAccess2 = true;
             supported_features->nullDescriptor = true;
+            if (is_dxvk && engine_version >= VK_MAKE_VERSION(2, 7, 0)) {
+               WRAPPER_LOG(info, "Faking VK_KHR_pipeline_library");
+               pdevice->vk.supported_extensions.KHR_pipeline_library = true;
+            }
             
             /* --- FORZAR CARACTERÍSTICAS FALTANTES EN MALI PARA ZINK/DXVK --- */
             supported_features->logicOp = true;
@@ -498,13 +515,8 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
             
             pdevice->vk.supported_extensions.EXT_depth_clip_enable = true;
             pdevice->vk.supported_extensions.EXT_custom_border_color = true;
+            
             supported_features->depthClipEnable = true;
-            /* ------------------------------------------------------------- */
-
-            if (is_dxvk && engine_version >= VK_MAKE_VERSION(2, 7, 0)) {
-               WRAPPER_LOG(info, "Faking VK_KHR_pipeline_library");
-               pdevice->vk.supported_extensions.KHR_pipeline_library = true;
-            }
             supported_features->extendedDynamicState = true;
             supported_features->extendedDynamicState2 = true;
             supported_features->dualSrcBlend = true;
@@ -661,6 +673,7 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
       list_addtail(&pdevice->vk.link, &_instance->physical_devices.list);
    }
 
+   free(physical_devices);
    return VK_SUCCESS;
 }
 
@@ -721,7 +734,31 @@ wrapper_GetPhysicalDeviceFeatures(VkPhysicalDevice physicalDevice,
                                   VkPhysicalDeviceFeatures* pFeatures) 
 {
    vk_common_GetPhysicalDeviceFeatures(physicalDevice, pFeatures);
-   pFeatures->logicOp = VK_TRUE;
+   
+   pFeatures->logicOp = true;
+   pFeatures->textureCompressionBC = true;
+   pFeatures->fillModeNonSolid = true;
+   pFeatures->shaderClipDistance = true;
+   pFeatures->shaderCullDistance = true;
+   pFeatures->geometryShader = true;
+   pFeatures->tessellationShader = true;
+   pFeatures->shaderInt16 = true;
+   pFeatures->sampleRateShading = true;
+   pFeatures->imageCubeArray = true;
+   pFeatures->shaderSampledImageArrayDynamicIndexing = true;
+   pFeatures->drawIndirectFirstInstance = true;
+   pFeatures->shaderUniformBufferArrayDynamicIndexing = true;
+   pFeatures->shaderStorageBufferArrayDynamicIndexing = true;
+   pFeatures->multiDrawIndirect = true;
+   pFeatures->sparseBinding = true;
+   pFeatures->shaderResourceMinLod = true;
+   pFeatures->shaderTessellationAndGeometryPointSize = true;
+   pFeatures->textureCompressionASTC_LDR = true;
+   pFeatures->occlusionQueryPrecise = true; 
+   pFeatures->shaderStorageImageExtendedFormats = true;
+   pFeatures->shaderStorageImageWriteWithoutFormat = true;
+   pFeatures->independentBlend = true;
+   pFeatures->variableMultisampleRate = false;
 }
 
 VKAPI_ATTR void VKAPI_CALL
@@ -778,7 +815,30 @@ wrapper_GetPhysicalDeviceFeatures2(VkPhysicalDevice physicalDevice,
    }
 
    /* FORZAR AL FINAL DE TODO PARA EVITAR QUE SE SOBREESCRIBA */
-   pFeatures->features.logicOp = VK_TRUE;
+   pFeatures->features.logicOp = true;
+   pFeatures->textureCompressionBC = true;
+   pFeatures->fillModeNonSolid = true;
+   pFeatures->shaderClipDistance = true;
+   pFeatures->shaderCullDistance = true;
+   pFeatures->geometryShader = true;
+   pFeatures->tessellationShader = true;
+   pFeatures->shaderInt16 = true;
+   pFeatures->sampleRateShading = true;
+   pFeatures->imageCubeArray = true;
+   pFeatures->shaderSampledImageArrayDynamicIndexing = true;
+   pFeatures->drawIndirectFirstInstance = true;
+   pFeatures->shaderUniformBufferArrayDynamicIndexing = true;
+   pFeatures->shaderStorageBufferArrayDynamicIndexing = true;
+   pFeatures->multiDrawIndirect = true;
+   pFeatures->sparseBinding = true;
+   pFeatures->shaderResourceMinLod = true;
+   pFeatures->shaderTessellationAndGeometryPointSize = true;
+   pFeatures->textureCompressionASTC_LDR = true;
+   pFeatures->occlusionQueryPrecise = true; 
+   pFeatures->shaderStorageImageExtendedFormats = true;
+   pFeatures->shaderStorageImageWriteWithoutFormat = true;
+   pFeatures->independentBlend = true;
+   pFeatures->variableMultisampleRate = false;
 }
 
 VKAPI_ATTR void VKAPI_CALL
@@ -1315,7 +1375,7 @@ wrapper_GetPhysicalDeviceFormatProperties2(VkPhysicalDevice physicalDevice,
    case VK_FORMAT_BC2_SRGB_BLOCK:
    case VK_FORMAT_BC3_UNORM_BLOCK:
    case VK_FORMAT_BC3_SRGB_BLOCK:
-   case VK_FORMAT_BC4_UNORM_BLOCK:
+   caseVK_FORMAT_BC4_UNORM_BLOCK:
    case VK_FORMAT_BC4_SNORM_BLOCK:
    case VK_FORMAT_BC5_UNORM_BLOCK:
    case VK_FORMAT_BC5_SNORM_BLOCK:
