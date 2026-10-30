@@ -146,10 +146,14 @@ wrapper_setup_device_extensions(struct wrapper_physical_device *pdevice) {
 
 static void
 wrapper_apply_device_extension_blacklist(struct wrapper_physical_device *physical_device) {
-   char *blacklist = getenv("WRAPPER_EXTENSION_BLACKLIST");
-   if (!blacklist)
+   char *env_blacklist = getenv("WRAPPER_EXTENSION_BLACKLIST");
+   if (!env_blacklist)
       return;
-   char *extension = strtok(blacklist, ",");
+   char *blacklist_copy = strdup(env_blacklist);
+   if (!blacklist_copy)
+      return;
+   char *saveptr = NULL;
+   char *extension = strtok_r(blacklist_copy, ",", &saveptr);
    while (extension != NULL) {
       for (int i = 0; i < VK_DEVICE_EXTENSION_COUNT; i++) {
          if (strstr(extension, vk_device_extensions[i].extensionName)) {
@@ -157,8 +161,9 @@ wrapper_apply_device_extension_blacklist(struct wrapper_physical_device *physica
             physical_device->vk.supported_extensions.extensions[i] = false;
          }
       }
-      extension = strtok(NULL, ",");
+      extension = strtok_r(NULL, ",", &saveptr);
    }
+   free(blacklist_copy);
 }
 
 static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
@@ -642,14 +647,6 @@ wrapper_GetPhysicalDeviceQueueFamilyProperties(VkPhysicalDevice physicalDevice,
       pdevice->dispatch_handle, pQueueFamilyPropertyCount, pQueueFamilyProperties);
    if (limit && *pQueueFamilyPropertyCount > limit)
       *pQueueFamilyPropertyCount = limit;
-
-   if (pQueueFamilyProperties && *pQueueFamilyPropertyCount > 0) {
-      for (uint32_t i = 0; i < *pQueueFamilyPropertyCount; i++) {
-         if (pQueueFamilyProperties[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
-            pQueueFamilyProperties[i].queueFlags |= VK_QUEUE_PRESENT_BIT;
-         }
-      }
-   }
 }
 
 VKAPI_ATTR void VKAPI_CALL
@@ -665,14 +662,6 @@ wrapper_GetPhysicalDeviceQueueFamilyProperties2(VkPhysicalDevice physicalDevice,
       pdevice->dispatch_handle, pQueueFamilyPropertyCount, pQueueFamilyProperties);
    if (limit && *pQueueFamilyPropertyCount > limit)
       *pQueueFamilyPropertyCount = limit;
-
-   if (pQueueFamilyProperties && *pQueueFamilyPropertyCount > 0) {
-      for (uint32_t i = 0; i < *pQueueFamilyPropertyCount; i++) {
-         if (pQueueFamilyProperties[i].queueFamilyProperties.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
-            pQueueFamilyProperties[i].queueFamilyProperties.queueFlags |= VK_QUEUE_PRESENT_BIT;
-         }
-      }
-   }
 }
 
 VKAPI_ATTR void VKAPI_CALL
