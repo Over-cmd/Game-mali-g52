@@ -2,6 +2,27 @@
 set -e
 
 BUILD_DIR="${1:-${BUILD_DIR:-build}}"
+ARCH="${ARCH:-aarch64}"
+
+export PYTHONPATH="/workspace/src/compiler:/workspace/src/compiler/nir:$PYTHONPATH"
+
+# ---------- NDK ----------
+NDK_DIR=$(find /home/builder/lib -maxdepth 2 -name "android-ndk*" 2>/dev/null | head -n 1)
+[ -z "$NDK_DIR" ] && NDK_DIR="/home/builder/lib/android-ndk-r30"
+NDK_BIN="${NDK_DIR}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+NDK_SYSROOT="${NDK_DIR}/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+
+if [ "$ARCH" = "arm" ]; then
+    TRIPLE="armv7a-linux-androideabi30"
+    SYSLIB="arm-linux-androideabi"
+    CPU_FAMILY="arm"; CPU="armv7"
+    LIBDIR_TAG="armhf"
+else
+    TRIPLE="aarch64-linux-android30"
+    SYSLIB="aarch64-linux-android"
+    CPU_FAMILY="aarch64"; CPU="armv8-a"
+    LIBDIR_TAG="aarch64"
+fi
 
 # 🚀 1. PREPARAR SYSROOT DE TERMUX (Si no existe)
 if [ ! -d "/tmp/sysroot_ready" ]; then
@@ -28,17 +49,11 @@ if [ ! -d "/tmp/sysroot_ready" ]; then
 fi
 
 # 🚀 2. GENERAR ARCHIVO DE CROSS-COMPILACIÓN PARA EL NDK
-NDK_DIR=$(find /home/builder/lib -maxdepth 2 -name "android-ndk*" 2>/dev/null | head -n 1)
-if [ -z "$NDK_DIR" ]; then
-    NDK_DIR=$(find /opt /usr/local /home -maxdepth 3 -name "android-ndk*" 2>/dev/null | head -n 1)
-fi
-NDK_BIN="${NDK_DIR}/toolchains/llvm/prebuilt/linux-x86_64/bin"
-
 mkdir -p /root/build-config
 cat << EOF > /root/build-config/cross_file.txt
 [binaries]
-c = '${NDK_BIN}/aarch64-linux-android30-clang'
-cpp = '${NDK_BIN}/aarch64-linux-android30-clang++'
+c = '${NDK_BIN}/${TRIPLE}-clang'
+cpp = '${NDK_BIN}/${TRIPLE}-clang++'
 ar = '${NDK_BIN}/llvm-ar'
 strip = '${NDK_BIN}/llvm-strip'
 pkg-config = 'pkg-config'
@@ -57,8 +72,8 @@ cpp_link_args = ['-L' + termux_dir + '/lib', '-landroid-shmem']
 
 [host_machine]
 system = 'android'
-cpu_family = 'aarch64'
-cpu = 'armv8-a'
+cpu_family = '${CPU_FAMILY}'
+cpu = '${CPU}'
 endian = 'little'
 EOF
 
@@ -82,38 +97,44 @@ echo "-> Compilando con Ninja..."
 ninja -C "${BUILD_DIR}" src/vulkan/wrapper/libvulkan_wrapper.so
 
 # 🚀 5. POST-PROCESAMIENTO Y STRIP
-cp "${BUILD_DIR}/src/vulkan/wrapper/libvulkan_wrapper.so" "${BUILD_DIR}/libvulkan_wrapper.so.unstripped"
+WRAPPER_SRC="${BUILD_DIR}/src/vulkan/wrapper/libvulkan_wrapper.so"
+if [ ! -f "$WRAPPER_SRC" ]; then
+    echo "-> [❌ ERROR GRAVE] El binario libvulkan_wrapper.so no se encuentra en ${BUILD_DIR}/."
+    exit 1
+fi
+
+cp "$WRAPPER_SRC" "${BUILD_DIR}/libvulkan_wrapper.so.unstripped"
 STRIP="${NDK_BIN}/llvm-strip"
-$STRIP --strip-unneeded -o "${BUILD_DIR}/libvulkan_wrapper.so" "${BUILD_DIR}/libvulkan_wrapper.so.unstripped"
+$STRIP --strip-unneeded -o "$WRAPPER_SRC" "${BUILD_DIR}/libvulkan_wrapper.so.unstripped"
 
-# 🚀 6. EMPAQUETADO FINAL EN ROOTFS PARA BANNERLATOR / WINLATOR
-ROOTFS_DIR="${BUILD_DIR}/rootfs_export"
-rm -rf "${ROOTFS_DIR}"
-mkdir -p "${ROOTFS_DIR}/usr/lib"
-mkdir -p "${ROOTFS_DIR}/usr/share/vulkan/icd.d"
+# 🚀 6. EMPAQUETADO FINAL IDÉNTICO AL YAML (Adrenotools + Manifestos ICD duales)
+echo "-> [Host] Estructurando paquete de producción idéntico al CI..."
+FINAL_PKG="final_pkg"
+rm -rf "$FINAL_PKG"
+mkdir -p "$FINAL_PKG/usr/lib" "$FINAL_PKG/usr/share/vulkan/icd.d"
 
-cp "${BUILD_DIR}/libvulkan_wrapper.so" "${ROOTFS_DIR}/usr/lib/libvulkan_wrapper.so"
+# Copiar wrapper principal
+cp -fv "$WRAPPER_SRC" "$FINAL_PKG/usr/lib/libvulkan_wrapper.so"
 
-# Copiar librerías de dependencias compartidas necesarias
-find "${BUILD_DIR}" -name "*.so" -exec cp {} "${ROOTFS_DIR}/usr/lib/" \; 2>/dev/null || true
+# Regla de comodines de Adrenotools y dependencias compartidas
+cp -fv ./build/subprojects/libadrenotools/*.so ./build/subprojects/libadrenotools/src/hook/*.so "$FINAL_PKG/usr/lib/" 2>/dev/null || true
+find "${BUILD_DIR}" -name "*.so" -not -path "*/CMakeFiles/*" -not -path "*/test/*" -exec cp -fv {} "$FINAL_PKG/usr/lib/" \; 2>/dev/null || true
 
-cat << 'EOF' > "${ROOTFS_DIR}/usr/share/vulkan/icd.d/wrapper_icd.json"
-{
-    "file_format_version": "1.0.0",
-    "ICD": {
-        "library_path": "libvulkan_wrapper.so",
-        "api_version": "1.3.255"
-    }
-}
-EOF
+chmod -R 755 "$FINAL_PKG/usr/lib/"
+patchelf --set-soname libvulkan_wrapper.so "$FINAL_PKG/usr/lib/libvulkan_wrapper.so" || true
+find "$FINAL_PKG/usr/lib/" -name "*.so" -exec patchelf --set-rpath '$ORIGIN' {} \; 2>/dev/null || true
 
-echo "-> Empaquetando rootfs comprimido en tar.zst..."
-cd "${ROOTFS_DIR}"
-tar -cvf - usr | zstd -o "../gamenative_driver_rootfs.tar.zst"
-cd - > /dev/null
+# Manifiestos ICD duales compatibles con la lista blanca
+echo '{"ICD": {"api_version": "1.3.289", "library_path": "libvulkan_wrapper.so"}, "file_format_version": "1.0.0"}' > "$FINAL_PKG/usr/share/vulkan/icd.d/wrapper_icd.aarch64.json"
+echo '{"ICD": {"api_version": "1.3.289", "library_path": "libvulkan_wrapper.so"}, "file_format_version": "1.0.0"}' > "$FINAL_PKG/usr/share/vulkan/icd.d/wrapper_icd.arm.json"
 
-cp "${BUILD_DIR}/gamenative_driver_rootfs.tar.zst" ./gamenative_driver_rootfs.tar.zst
+sync && sleep 3
+cd "$FINAL_PKG"
+tar -I 'zstd -19 -T0' -cf ../wrapper.tzst usr/
+cd ..
+
+cp wrapper.tzst ./gamenative_driver_rootfs.tar.zst
 
 echo "=========================================================="
-echo " 🟢 BUILD EXITOSO: gamenative_driver_rootfs.tar.zst LISTO!"
+echo " 🟢 BUILD EXITOSO: gamenative_driver_rootfs.tar.zst Y wrapper.tzst LISTOS!"
 echo "=========================================================="
