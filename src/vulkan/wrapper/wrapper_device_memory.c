@@ -1,6 +1,6 @@
 /*
  * wrapper_device_memory.c
- * (Versión modificada con protección de mapeo, manejo de swapchain y WRPER_SYNC)
+ * (Versión modificada con protección de mapeo, manejo de swapchain, WRAPPER_SYNC y wrapper_memory_device_only)
  */
 
 #include "wrapper_private.h"
@@ -409,11 +409,10 @@ wrapper_device_memory_from_handle(struct wrapper_device *device, VkDeviceMemory 
 static void
 wrapper_cache_maintain(void *addr, size_t size, bool invalidate)
 {
-   // Comprobación opcional de WRAPPER_SYNC (si está en 0, se puede omitir o modular)
    static int wrapper_sync_enabled = -1;
    if (wrapper_sync_enabled == -1) {
       const char *env = getenv("WRAPPER_SYNC");
-      wrapper_sync_enabled = env ? atoi(env) : 0; // Por defecto desactivado (0) para ganar rendimiento
+      wrapper_sync_enabled = env ? atoi(env) : 0;
    }
    if (!wrapper_sync_enabled) return;
 
@@ -506,7 +505,7 @@ wrapper_AllocateMemory(VkDevice _device, const VkMemoryAllocateInfo* pAllocateIn
    
    static int bypass_swapchains = -1;
    if (bypass_swapchains == -1) 
-      bypass_swapchains = getenv("WRAPPER_BYPASS_SWAPCHAIN_PLACED") ? atoi(getenv("WRAPPER_BYPASS_SWAPCHAIN_PLACED")) : 1; // Activado por defecto para evitar pantalla negra en Mali
+      bypass_swapchains = getenv("WRAPPER_BYPASS_SWAPCHAIN_PLACED") ? atoi(getenv("WRAPPER_BYPASS_SWAPCHAIN_PLACED")) : 1;
 
    if (bypass_swapchains && dedicated_allocate_info && dedicated_allocate_info->image != VK_NULL_HANDLE) {
       struct wrapper_image *img = get_wrapper_image_from_handle(device, dedicated_allocate_info->image);
@@ -519,16 +518,15 @@ wrapper_AllocateMemory(VkDevice _device, const VkMemoryAllocateInfo* pAllocateIn
    result = wrapper_device_memory_create(device, pAllocator, &mem);
    if (result != VK_SUCCESS) {
       simple_mtx_unlock(&device->resource_mutex);
-      goto fallback; // Fallback seguro en vez de crashar
+      goto fallback;
    }
    mem->alloc_size = pAllocateInfo->allocationSize;
 
-   // Intento de asignación por backend seguro
    result = wrapper_allocate_memory_dmaheap(device, pAllocateInfo, pAllocator, &mem->dispatch_handle, &mem->fd);
    if (result != VK_SUCCESS) {
       wrapper_device_memory_destroy(mem);
       simple_mtx_unlock(&device->resource_mutex);
-      goto fallback; // Si falla DMA-BUF, deriva a la asignación estándar de Vulkan
+      goto fallback;
    }
 
    *pMemory = mem->dispatch_handle;
@@ -543,6 +541,15 @@ fallback:
       simple_mtx_unlock(&device->resource_mutex);
    }
    return result;
+}
+
+bool
+wrapper_memory_device_only(struct wrapper_device *device, VkDeviceMemory memory)
+{
+   simple_mtx_lock(&device->resource_mutex);
+   bool found = _mesa_hash_table_u64_search(device->device_only_memory, (uint64_t)memory) != NULL;
+   simple_mtx_unlock(&device->resource_mutex);
+   return found;
 }
 
 VKAPI_ATTR void VKAPI_CALL
@@ -591,10 +598,9 @@ wrapper_MapMemory2KHR(VkDevice _device, const VkMemoryMapInfoKHR* pMemoryMapInfo
 
    mem->map_size = (pMemoryMapInfo->size == VK_WHOLE_SIZE) ? mem->alloc_size : pMemoryMapInfo->size;
 
-   // PROTECCIÓN DE MAPEO: Si mmap con MAP_FIXED falla en Mali, intentamos un mmap seguro sin posición fija estricta
    mem->map_address = mmap(placed_info->pPlacedAddress, mem->map_size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, fd, 0);
    if (mem->map_address == MAP_FAILED) {
-      mem->map_address = mmap(NULL, mem->map_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0); // Fallback flexible
+      mem->map_address = mmap(NULL, mem->map_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
       if (mem->map_address == MAP_FAILED) {
          mem->map_address = NULL;
          mem->map_size = 0;
