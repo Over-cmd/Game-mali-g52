@@ -614,24 +614,39 @@ wrapper_MapMemory2KHR(VkDevice _device, const VkMemoryMapInfoKHR* pMemoryMapInfo
    return VK_SUCCESS;
 }
 
-VKAPI_ATTR void VKAPI_CALL
-wrapper_UnmapMemory(VkDevice _device, VkDeviceMemory _memory) {
-   vk_common_UnmapMemory(_device, _memory);
-}
-
-VKAPI_ATTR VkResult VKAPI_CALL
-wrapper_UnmapMemory2KHR(VkDevice _device, const VkMemoryUnmapInfoKHR* pMemoryUnmapInfo)
+/* Función auxiliar interna unificada para el desmapeo seguro */
+static void
+wrapper_internal_unmap(VkDevice _device, VkDeviceMemory _memory)
 {
    VK_FROM_HANDLE(wrapper_device, device, _device);
-   struct wrapper_device_memory *mem = wrapper_device_memory_from_handle(device, pMemoryUnmapInfo->memory);
+   struct wrapper_device_memory *mem = wrapper_device_memory_from_handle(device, _memory);
    if (!mem) {
-      device->dispatch_table.UnmapMemory(device->dispatch_handle, pMemoryUnmapInfo->memory);
-      return VK_SUCCESS;
+      device->dispatch_table.UnmapMemory(device->dispatch_handle, _memory);
+      return;
    }
+   
+   simple_mtx_lock(&device->resource_mutex);
    if (mem->map_address) {
       munmap(mem->map_address, mem->map_size);
       mem->map_address = NULL;
       mem->map_size = 0;
    }
+   simple_mtx_unlock(&device->resource_mutex);
+}
+
+VKAPI_ATTR void VKAPI_CALL
+wrapper_UnmapMemory(VkDevice _device, VkDeviceMemory _memory) {
+   wrapper_internal_unmap(_device, _memory);
+   VK_FROM_HANDLE(wrapper_device, device, _device);
+   struct wrapper_device_memory *mem = wrapper_device_memory_from_handle(device, _memory);
+   if (!mem) {
+      device->dispatch_table.UnmapMemory(device->dispatch_handle, _memory);
+   }
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL
+wrapper_UnmapMemory2KHR(VkDevice _device, const VkMemoryUnmapInfoKHR* pMemoryUnmapInfo)
+{
+   wrapper_internal_unmap(_device, pMemoryUnmapInfo->memory);
    return VK_SUCCESS;
 }
