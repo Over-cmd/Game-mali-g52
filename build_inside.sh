@@ -92,9 +92,9 @@ if [ ! -d "${BUILD_DIR}" ]; then
       -Dvulkan-drivers=wrapper
 fi
 
-# 🚀 4. COMPILACIÓN CON NINJA
-echo "-> Compilando con Ninja..."
-ninja -C "${BUILD_DIR}" src/vulkan/wrapper/libvulkan_wrapper.so
+# 🚀 4. COMPILACIÓN CON NINJA (Compilar todo el proyecto y subproyectos para generar hooks)
+echo "-> Compilando con Ninja (Wrapper + Adrenotools Hooks)..."
+ninja -C "${BUILD_DIR}"
 
 # 🚀 5. POST-PROCESAMIENTO Y STRIP
 WRAPPER_SRC="${BUILD_DIR}/src/vulkan/wrapper/libvulkan_wrapper.so"
@@ -107,8 +107,8 @@ cp "$WRAPPER_SRC" "${BUILD_DIR}/libvulkan_wrapper.so.unstripped"
 STRIP="${NDK_BIN}/llvm-strip"
 $STRIP --strip-unneeded -o "$WRAPPER_SRC" "${BUILD_DIR}/libvulkan_wrapper.so.unstripped"
 
-# 🚀 6. EMPAQUETADO FINAL IDÉNTICO AL YAML (Adrenotools + Manifestos ICD duales)
-echo "-> [Host] Estructurando paquete de producción idéntico al CI..."
+# 🚀 6. EMPAQUETADO FINAL LIMPIO (Wrapper + Adrenotools + Hooks Reales sin Stubs)
+echo "-> [Host] Estructurando paquete limpio con wrapper y hooks de adrenotools..."
 FINAL_PKG="final_pkg"
 rm -rf "$FINAL_PKG"
 mkdir -p "$FINAL_PKG/usr/lib" "$FINAL_PKG/usr/share/vulkan/icd.d"
@@ -116,9 +116,15 @@ mkdir -p "$FINAL_PKG/usr/lib" "$FINAL_PKG/usr/share/vulkan/icd.d"
 # Copiar wrapper principal
 cp -fv "$WRAPPER_SRC" "$FINAL_PKG/usr/lib/libvulkan_wrapper.so"
 
-# Regla de comodines de Adrenotools y dependencias compartidas
-cp -fv ./build/subprojects/libadrenotools/*.so ./build/subprojects/libadrenotools/src/hook/*.so "$FINAL_PKG/usr/lib/" 2>/dev/null || true
-find "${BUILD_DIR}" -name "*.so" -not -path "*/CMakeFiles/*" -not -path "*/test/*" -exec cp -fv {} "$FINAL_PKG/usr/lib/" \; 2>/dev/null || true
+# Copiar libadrenotools base y buscar de forma recursiva todos los hooks necesarios
+cp -fv ${BUILD_DIR}/subprojects/libadrenotools/*.so "$FINAL_PKG/usr/lib/" 2>/dev/null || true
+find "${BUILD_DIR}" -name "*hook*.so" -exec cp -fv {} "$FINAL_PKG/usr/lib/" \; 2>/dev/null || true
+
+# Eliminar explícitamente cualquier stub de Android para que no se filtren
+rm -f "$FINAL_PKG/usr/lib/liblog.so" "$FINAL_PKG/usr/lib/libcutils.so" "$FINAL_PKG/usr/lib/libsync.so" "$FINAL_PKG/usr/lib/libhardware.so" "$FINAL_PKG/usr/lib/libnativewindow.so"
+
+echo "-> Listado exacto y final de archivos que van en usr/lib:"
+ls -la "$FINAL_PKG/usr/lib/"
 
 chmod -R 755 "$FINAL_PKG/usr/lib/"
 patchelf --set-soname libvulkan_wrapper.so "$FINAL_PKG/usr/lib/libvulkan_wrapper.so" || true
