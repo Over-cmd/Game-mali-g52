@@ -76,20 +76,22 @@ jobs:
         run: |
           docker run --rm -v "${{ github.workspace }}:/workspace" local-wrapper-compiler:latest ${{ env.BUILD_DIR }}
 
-      - name: 📦 7. Forjar Paquete Correcto (Wrapper + Libadrenotools)
+      - name: 📦 7. Forjar Paquete Correcto (Wrapper + Todos los Hooks de Adrenotools)
         run: |
-          WRAPPER_SO="build/src/vulkan/wrapper/libvulkan_wrapper.so"
+          WRAPPER_SO=$(find build -name "libvulkan_wrapper.so" | head -n 1)
           if [ -f "$WRAPPER_SO" ]; then
-            echo "-> [Host] Estructurando paquete con el wrapper y los hooks de adrenotools..."
+            echo "-> [Host] Wrapper real encontrado en: $WRAPPER_SO"
             sudo rm -rf final_pkg
             mkdir -p final_pkg/usr/lib final_pkg/usr/share/vulkan/icd.d
             
             # 1. Copiar el binario principal del wrapper
             cp -fv "$WRAPPER_SO" final_pkg/usr/lib/libvulkan_wrapper.so
             
-            # 2. Copiar EXCLUSIVAMENTE las librerías de libadrenotools y sus hooks necesarios
-            cp -fv ./build/subprojects/libadrenotools/*.so final_pkg/usr/lib/ 2>/dev/null || true
-            cp -fv ./build/subprojects/libadrenotools/src/hook/*.so final_pkg/usr/lib/ 2>/dev/null || true
+            # 2. Búsqueda profunda y automática de TODOS los archivos .so de libadrenotools y hooks dentro de build
+            find build -name "*.so" -not -path "*/CMakeFiles/*" -not -path "*/test/*" -exec cp -fv {} final_pkg/usr/lib/ \; 2>/dev/null || true
+            
+            echo "-> Listado exacto de archivos empaquetados en usr/lib:"
+            ls -la final_pkg/usr/lib/
             
             # Aplicar permisos y rpath a las librerías copiadas
             chmod -R 755 final_pkg/usr/lib/
@@ -106,7 +108,7 @@ jobs:
             sync && sleep 3
             cd final_pkg && tar -I 'zstd -19 -T0' -cf ../wrapper.tzst usr/ || { echo "-> [❌ ERROR] Falló la compresión tar"; exit 1; }
             cd ..
-            echo "-> ¡Paquete forjado con éxito con la estructura exacta requerida!"
+            echo "-> ¡Paquete forjado con éxito con todos los hooks incluidos!"
           else
             echo "-> [❌ ERROR GRAVE] El binario libvulkan_wrapper.so no se encuentra en build/."
             exit 1
