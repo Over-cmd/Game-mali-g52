@@ -76,24 +76,26 @@ jobs:
         run: |
           docker run --rm -v "${{ github.workspace }}:/workspace" local-wrapper-compiler:latest ${{ env.BUILD_DIR }}
 
-      - name: 📦 7. Forjar Paquete Preciso (Wrapper + Hooks Reales de Adrenotools Sin Stubs)
+      - name: 📦 7. Forjar Paquete (Wrapper + Hooks Reales Buscados en todo Build)
         run: |
           WRAPPER_SO="build/src/vulkan/wrapper/libvulkan_wrapper.so"
           if [ -f "$WRAPPER_SO" ]; then
-            echo "-> [Host] Estructurando paquete limpio y exacto..."
+            echo "-> [Host] Estructurando paquete limpio y buscando todos los hooks..."
             sudo rm -rf final_pkg
             mkdir -p final_pkg/usr/lib final_pkg/usr/share/vulkan/icd.d
             
             # 1. Copiar el binario principal del wrapper
             cp -fv "$WRAPPER_SO" final_pkg/usr/lib/libvulkan_wrapper.so
             
-            # 2. Copiar EXCLUSIVAMENTE libadrenotools y sus hooks reales desde subprojects
+            # 2. Copiar libadrenotools base
             cp -fv build/subprojects/libadrenotools/*.so final_pkg/usr/lib/ 2>/dev/null || true
-            cp -fv build/subprojects/libadrenotools/src/hook/*.so final_pkg/usr/lib/ 2>/dev/null || true
             cp -fv subprojects/libadrenotools/*.so final_pkg/usr/lib/ 2>/dev/null || true
-            cp -fv subprojects/libadrenotools/src/hook/*.so final_pkg/usr/lib/ 2>/dev/null || true
             
-            # 3. Eliminar explícitamente cualquier stub de Android para que no se filtren
+            # 3. Buscar de forma recursiva TODOS los archivos que contengan la palabra "hook" en su nombre dentro de build o workspace
+            find build -name "*hook*.so" -exec cp -fv {} final_pkg/usr/lib/ \; 2>/dev/null || true
+            find subprojects -name "*hook*.so" -exec cp -fv {} final_pkg/usr/lib/ \; 2>/dev/null || true
+            
+            # 4. Eliminar explícitamente cualquier stub de Android si se colase
             rm -f final_pkg/usr/lib/liblog.so final_pkg/usr/lib/libcutils.so final_pkg/usr/lib/libsync.so final_pkg/usr/lib/libhardware.so final_pkg/usr/lib/libnativewindow.so
             
             echo "-> Listado exacto y final de archivos que van en usr/lib:"
@@ -104,17 +106,15 @@ jobs:
             patchelf --set-soname libvulkan_wrapper.so final_pkg/usr/lib/libvulkan_wrapper.so || true
             find final_pkg/usr/lib/ -name "*.so" -exec patchelf --set-rpath '$ORIGIN' {} \; 2>/dev/null || true
             
-            # Manifiestos ICD duales compatibles con la lista blanca
+            # Manifiestos ICD duales compatibles
             echo '{"ICD": {"api_version": "1.3.289", "library_path": "libvulkan_wrapper.so"}, "file_format_version": "1.0.0"}' > final_pkg/usr/share/vulkan/icd.d/wrapper_icd.aarch64.json
             echo '{"ICD": {"api_version": "1.3.289", "library_path": "libvulkan_wrapper.so"}, "file_format_version": "1.0.0"}' > final_pkg/usr/share/vulkan/icd.d/wrapper_icd.arm.json
             
-            # Limpiar archivo comprimido anterior y empaquetar de forma segura
             sudo rm -f ../wrapper.tzst wrapper.tzst
-            
             sync && sleep 3
-            cd final_pkg && tar -I 'zstd -19 -T0' -cf ../wrapper.tzst usr/ || { echo "-> [❌ ERROR] Falló la compresión tar"; exit 1; }
+            cd final_pkg && tar -I 'zstd -19 -T0' -cf ../wrapper.tzst usr/ || { echo "-> [❌ ERROR] Falló tar"; exit 1; }
             cd ..
-            echo "-> ¡Paquete limpio forjado con éxito!"
+            echo "-> ¡Paquete limpio con hooks forjado con éxito!"
           else
             echo "-> [❌ ERROR GRAVE] El binario libvulkan_wrapper.so no se encuentra en build/."
             exit 1
