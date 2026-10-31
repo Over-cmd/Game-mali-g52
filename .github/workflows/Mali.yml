@@ -81,7 +81,7 @@ jobs:
           WRAPPER_SO="build/src/vulkan/wrapper/libvulkan_wrapper.so"
           if [ -f "$WRAPPER_SO" ]; then
             echo "-> [Host] ¡Éxito! Estructurando tu paquete original compatible de producción..."
-            rm -rf final_pkg
+            sudo rm -rf final_pkg
             mkdir -p final_pkg/usr/lib final_pkg/usr/share/vulkan/icd.d
             cp -fv "$WRAPPER_SO" final_pkg/usr/lib/libvulkan_wrapper.so
             
