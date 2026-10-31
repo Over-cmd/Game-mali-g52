@@ -1,4 +1,4 @@
-Name: Bannerlator Mali Wrapper CI
+name: Bannerlator Mali Wrapper CI
 
 on:
   push:
